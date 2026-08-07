@@ -124,6 +124,45 @@ function formatLivePrice(v: number): string {
   return v.toFixed(6);
 }
 
+interface SymbolPriceFormat {
+  precision: number;
+  minMove: number;
+}
+
+interface ExchangeSymbol {
+  symbol: string;
+  status: string;
+  contractType: string;
+  quoteAsset: string;
+  pricePrecision?: number;
+  filters?: Array<{
+    filterType?: string;
+    tickSize?: string;
+  }>;
+}
+
+function decimalsFromTickSize(tickSize: string): number {
+  const normalized = tickSize.toLowerCase();
+  if (normalized.includes("e-")) {
+    const exponent = Number(normalized.split("e-")[1]);
+    return Number.isInteger(exponent) ? exponent : 0;
+  }
+  const fraction = normalized.split(".")[1]?.replace(/0+$/, "") ?? "";
+  return fraction.length;
+}
+
+function priceFormatForSymbol(item: ExchangeSymbol): SymbolPriceFormat {
+  const tickSizeText = item.filters?.find((filter) => filter.filterType === "PRICE_FILTER")?.tickSize;
+  const tickSize = Number(tickSizeText);
+  const precision = tickSizeText
+    ? decimalsFromTickSize(tickSizeText)
+    : Math.max(0, Math.min(8, item.pricePrecision ?? 2));
+  return {
+    precision,
+    minMove: Number.isFinite(tickSize) && tickSize > 0 ? tickSize : 10 ** -precision,
+  };
+}
+
 /** Major, high-volume markets pinned to the top of the pair list. */
 const MAJOR_SYMBOLS = [
   "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT",
@@ -193,6 +232,7 @@ export function FuturesChart() {
   const [changes, setChanges] = useState<Record<string, number>>({});
   const [pairPrices, setPairPrices] = useState<Record<string, number>>({});
   const [pairVolumes, setPairVolumes] = useState<Record<string, number>>({});
+  const [symbolPriceFormats, setSymbolPriceFormats] = useState<Record<string, SymbolPriceFormat>>({});
   const [isScrolledBack, setIsScrolledBack] = useState(false);
   const isScrolledBackRef = useRef(false);
   const [isSyncingLive, setIsSyncingLive] = useState(false);
@@ -253,13 +293,16 @@ export function FuturesChart() {
   const fetchSymbols = useCallback(async () => {
     const response = await fetch("https://cgirdlkuarpzrpaybrkb.supabase.co/functions/v1/hyper-task?type=exchange-info");
     if (!response.ok) throw new Error(`Failed to load symbols (${response.status})`);
-    const data = (await response.json()) as {
-      symbols: { symbol: string; status: string; contractType: string; quoteAsset: string }[];
+    const data = (await response.json()) as { symbols: ExchangeSymbol[] };
+    const instruments = data.symbols.filter(
+      (item) => item.status === "TRADING" && item.contractType === "PERPETUAL" && item.quoteAsset === "USDT",
+    );
+    return {
+      symbols: instruments.map((item) => item.symbol).sort(),
+      priceFormats: Object.fromEntries(
+        instruments.map((item) => [item.symbol, priceFormatForSymbol(item)]),
+      ),
     };
-    return data.symbols
-      .filter((item) => item.status === "TRADING" && item.contractType === "PERPETUAL" && item.quoteAsset === "USDT")
-      .map((item) => item.symbol)
-      .sort();
   }, []);
 
   const updateScrolledState = useCallback(() => {
@@ -778,8 +821,9 @@ export function FuturesChart() {
   // ── fetch all USDT perpetual pairs from Binance exchangeInfo ──────────────
   useEffect(() => {
     fetchSymbols()
-      .then((syms) => {
-        if (syms.length > 0) setAllSymbols(syms);
+      .then(({ symbols, priceFormats }) => {
+        if (symbols.length > 0) setAllSymbols(symbols);
+        setSymbolPriceFormats(priceFormats);
       })
       .catch(() => { /* keep DEFAULT_SYMBOLS */ });
   }, [fetchSymbols]);
@@ -877,6 +921,16 @@ export function FuturesChart() {
   useEffect(() => {
     const series = seriesRef.current;
     if (!series || baseCandles.length === 0) return;
+    const priceFormat = symbolPriceFormats[symbol];
+    if (priceFormat) {
+      series.applyOptions({
+        priceFormat: {
+          type: "price",
+          precision: priceFormat.precision,
+          minMove: priceFormat.minMove,
+        },
+      });
+    }
     series.setData(baseCandles.map((c) => ({ ...c, time: c.time as UTCTimestamp })));
 
     // Re-apply the live forming candle so a background history refresh
@@ -898,7 +952,7 @@ export function FuturesChart() {
     }
     drawOverlay.current();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseCandles]);
+  }, [baseCandles, symbol, symbolPriceFormats]);
 
   // ── redraw overlay when zones or enabled tools change ────────────────────
   useEffect(() => { drawOverlay.current(); }, [zones, enabledTools]);
