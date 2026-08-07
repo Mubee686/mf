@@ -1109,12 +1109,24 @@ export function FuturesChart() {
 
   const filteredSymbols = useMemo(() => {
     const q = debouncedQuery.trim().toUpperCase();
-    const rank = new Map(promotedSymbols.map((item, index) => [item, index]));
-    const ordered = [...allSymbols].sort((a, b) =>
-      (rank.get(a) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b) ?? Number.MAX_SAFE_INTEGER),
-    );
+    const promotedRank = new Map(promotedSymbols.map((item, index) => [item, index]));
+    const score = (s: string) => {
+      const promoted = promotedRank.get(s);
+      if (promoted != null) return -1_000_000 + promoted;
+      const major = MAJOR_SYMBOLS.indexOf(s);
+      if (major !== -1) return -100_000 + major;
+      // Everything else: highest 24h quote volume first; multiplier-named
+      // micro-cap pairs (1000PEPEUSDT, 1000000BOBUSDT…) sink automatically.
+      const vol = pairVolumes[s] ?? 0;
+      return -vol;
+    };
+    const ordered = [...allSymbols].sort((a, b) => {
+      const d = score(a) - score(b);
+      return d !== 0 ? d : a.localeCompare(b);
+    });
     return q ? ordered.filter((s) => s.includes(q)) : ordered;
-  }, [allSymbols, debouncedQuery, promotedSymbols]);
+  }, [allSymbols, debouncedQuery, promotedSymbols, pairVolumes]);
+
 
   const selectSymbol = useCallback((nextSymbol: string) => {
     if (query.trim()) {
