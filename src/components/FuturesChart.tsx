@@ -124,6 +124,15 @@ function formatLivePrice(v: number): string {
   return v.toFixed(6);
 }
 
+/** Major, high-volume markets pinned to the top of the pair list. */
+const MAJOR_SYMBOLS = [
+  "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT",
+  "ADAUSDT", "AVAXUSDT", "LINKUSDT", "TRXUSDT", "DOTUSDT", "LTCUSDT",
+  "BCHUSDT", "TONUSDT", "SUIUSDT", "NEARUSDT", "APTUSDT", "ATOMUSDT",
+  "ETCUSDT", "FILUSDT", "ARBUSDT", "OPUSDT", "UNIUSDT", "AAVEUSDT",
+  "INJUSDT", "HBARUSDT", "XLMUSDT", "ICPUSDT", "SEIUSDT", "TIAUSDT",
+];
+
 /** How many pair rows to render at a time (windowed list for 500+ pairs). */
 const PAGE_SIZE = 40;
 
