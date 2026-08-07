@@ -1,6 +1,17 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { TrendingUp, BarChart2, Shield, Zap, ChevronDown, ArrowRight, User } from "lucide-react";
+import {
+  TrendingUp,
+  BarChart2,
+  Shield,
+  Zap,
+  ChevronDown,
+  ArrowRight,
+  User,
+  MousePointerClick,
+  CreditCard,
+  LineChart,
+} from "lucide-react";
 import { useAuthSession } from "@/hooks/use-auth";
 import { OpenTerminalButton } from "@/components/TerminalChoiceModal";
 
@@ -298,6 +309,100 @@ function FeatureCard({
   );
 }
 
+/* ─── Step card ─────────────────────────────────────────────────────────── */
+function StepCard({
+  step,
+  icon,
+  title,
+  desc,
+  delay,
+}: {
+  step: string;
+  icon: React.ReactNode;
+  title: string;
+  desc: string;
+  delay: string;
+}) {
+  const { ref, visible } = useReveal();
+  return (
+    <div
+      ref={ref}
+      style={{
+        transitionDelay: delay,
+        opacity: visible ? 1 : 0,
+        transform: visible ? "translateY(0)" : "translateY(20px)",
+        transition: "opacity 0.4s ease, transform 0.4s ease",
+      }}
+      className="relative flex flex-col items-start gap-4 rounded-2xl border border-border bg-card p-6"
+    >
+      <span className="absolute right-5 top-4 text-5xl font-extrabold leading-none text-muted/30">
+        {step}
+      </span>
+      <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-accent text-primary">
+        {icon}
+      </div>
+      <div>
+        <h3 className="mb-1 text-base font-semibold text-card-foreground">{title}</h3>
+        <p className="text-sm leading-relaxed text-muted-foreground">{desc}</p>
+      </div>
+    </div>
+  );
+}
+
+/* ─── How it works ──────────────────────────────────────────────────────── */
+function HowItWorks() {
+  const { ref: headRef, visible: headVisible } = useReveal();
+  return (
+    <section className="relative px-6 py-20 bg-background">
+      <div className="mx-auto max-w-5xl">
+        <div
+          ref={headRef}
+          style={{
+            opacity: headVisible ? 1 : 0,
+            transform: headVisible ? "translateY(0)" : "translateY(20px)",
+            transition: "opacity 0.4s ease, transform 0.4s ease",
+          }}
+          className="mb-14 text-center"
+        >
+          <div className="mx-auto mb-4 w-fit rounded-full border border-border bg-card px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-primary">
+            How it works
+          </div>
+          <h2 className="mb-3 text-3xl font-extrabold tracking-tight text-foreground sm:text-4xl">
+            Start trading in three steps
+          </h2>
+          <p className="mx-auto max-w-xl text-base text-muted-foreground">
+            No setup headaches. Create an account, pick your access level, and open the terminal.
+          </p>
+        </div>
+
+        <div className="grid gap-5 sm:grid-cols-3">
+          <StepCard
+            step="01"
+            icon={<MousePointerClick className="h-5 w-5" />}
+            title="Create your account"
+            desc="Sign up in seconds. No credit card required to explore the platform."
+            delay="0ms"
+          />
+          <StepCard
+            step="02"
+            icon={<CreditCard className="h-5 w-5" />}
+            title="Choose your access"
+            desc="Start with the free 1-day trial, then activate a monthly or annual plan."
+            delay="60ms"
+          />
+          <StepCard
+            step="03"
+            icon={<LineChart className="h-5 w-5" />}
+            title="Open the terminal"
+            desc="Launch the Forex or Futures terminal and trade with SMC analysis tools."
+            delay="120ms"
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* ─── Landing page ──────────────────────────────────────────────────────── */
 function LandingPage() {
   const authRef = useRef<HTMLDivElement>(null);
@@ -427,6 +532,11 @@ function LandingPage() {
           </div>
         </div>
       </section>
+
+      {/* ══════════════════════════════════════════════════════
+          HOW IT WORKS SECTION
+      ════════════════════════════════════════════════════════ */}
+      <HowItWorks />
 
       {/* ══════════════════════════════════════════════════════
           MEMBERSHIP PLANS SECTION
