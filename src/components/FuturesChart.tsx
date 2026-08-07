@@ -183,6 +183,7 @@ export function FuturesChart() {
   const [membershipActive, setMembershipActive] = useState(false);
   const [changes, setChanges] = useState<Record<string, number>>({});
   const [pairPrices, setPairPrices] = useState<Record<string, number>>({});
+  const [pairVolumes, setPairVolumes] = useState<Record<string, number>>({});
   const [isScrolledBack, setIsScrolledBack] = useState(false);
   const isScrolledBackRef = useRef(false);
   const [isSyncingLive, setIsSyncingLive] = useState(false);
