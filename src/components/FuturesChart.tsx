@@ -225,17 +225,21 @@ export function FuturesChart() {
   const fetchTicker = useCallback(async () => {
     const response = await fetch("https://cgirdlkuarpzrpaybrkb.supabase.co/functions/v1/hyper-task?type=ticker");
     if (!response.ok) throw new Error(`Failed to load ticker data (${response.status})`);
-    const rows = (await response.json()) as { symbol: string; lastPrice: string; priceChangePercent: string }[];
+    const rows = (await response.json()) as { symbol: string; lastPrice: string; priceChangePercent: string; quoteVolume?: string }[];
     const nextChanges: Record<string, number> = {};
     const nextPrices: Record<string, number> = {};
+    const nextVolumes: Record<string, number> = {};
     for (const row of rows) {
       const change = Number(row.priceChangePercent);
       const price = Number(row.lastPrice);
+      const volume = Number(row.quoteVolume);
       if (Number.isFinite(change)) nextChanges[row.symbol] = change;
       if (Number.isFinite(price) && price > 0) nextPrices[row.symbol] = price;
+      if (Number.isFinite(volume) && volume > 0) nextVolumes[row.symbol] = volume;
     }
-    return { changes: nextChanges, prices: nextPrices };
+    return { changes: nextChanges, prices: nextPrices, volumes: nextVolumes };
   }, []);
+
 
   const fetchSymbols = useCallback(async () => {
     const response = await fetch("https://cgirdlkuarpzrpaybrkb.supabase.co/functions/v1/hyper-task?type=exchange-info");
