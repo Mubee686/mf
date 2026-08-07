@@ -124,6 +124,15 @@ function formatLivePrice(v: number): string {
   return v.toFixed(6);
 }
 
+/** Major, high-volume markets pinned to the top of the pair list. */
+const MAJOR_SYMBOLS = [
+  "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT",
+  "ADAUSDT", "AVAXUSDT", "LINKUSDT", "TRXUSDT", "DOTUSDT", "LTCUSDT",
+  "BCHUSDT", "TONUSDT", "SUIUSDT", "NEARUSDT", "APTUSDT", "ATOMUSDT",
+  "ETCUSDT", "FILUSDT", "ARBUSDT", "OPUSDT", "UNIUSDT", "AAVEUSDT",
+  "INJUSDT", "HBARUSDT", "XLMUSDT", "ICPUSDT", "SEIUSDT", "TIAUSDT",
+];
+
 /** How many pair rows to render at a time (windowed list for 500+ pairs). */
 const PAGE_SIZE = 40;
 
@@ -183,6 +192,7 @@ export function FuturesChart() {
   const [membershipActive, setMembershipActive] = useState(false);
   const [changes, setChanges] = useState<Record<string, number>>({});
   const [pairPrices, setPairPrices] = useState<Record<string, number>>({});
+  const [pairVolumes, setPairVolumes] = useState<Record<string, number>>({});
   const [isScrolledBack, setIsScrolledBack] = useState(false);
   const isScrolledBackRef = useRef(false);
   const [isSyncingLive, setIsSyncingLive] = useState(false);
@@ -224,17 +234,21 @@ export function FuturesChart() {
   const fetchTicker = useCallback(async () => {
     const response = await fetch("https://cgirdlkuarpzrpaybrkb.supabase.co/functions/v1/hyper-task?type=ticker");
     if (!response.ok) throw new Error(`Failed to load ticker data (${response.status})`);
-    const rows = (await response.json()) as { symbol: string; lastPrice: string; priceChangePercent: string }[];
+    const rows = (await response.json()) as { symbol: string; lastPrice: string; priceChangePercent: string; quoteVolume?: string }[];
     const nextChanges: Record<string, number> = {};
     const nextPrices: Record<string, number> = {};
+    const nextVolumes: Record<string, number> = {};
     for (const row of rows) {
       const change = Number(row.priceChangePercent);
       const price = Number(row.lastPrice);
+      const volume = Number(row.quoteVolume);
       if (Number.isFinite(change)) nextChanges[row.symbol] = change;
       if (Number.isFinite(price) && price > 0) nextPrices[row.symbol] = price;
+      if (Number.isFinite(volume) && volume > 0) nextVolumes[row.symbol] = volume;
     }
-    return { changes: nextChanges, prices: nextPrices };
+    return { changes: nextChanges, prices: nextPrices, volumes: nextVolumes };
   }, []);
+
 
   const fetchSymbols = useCallback(async () => {
     const response = await fetch("https://cgirdlkuarpzrpaybrkb.supabase.co/functions/v1/hyper-task?type=exchange-info");
@@ -379,6 +393,7 @@ export function FuturesChart() {
           if (cancelled) return;
           setChanges(ticker.changes);
           setPairPrices(ticker.prices);
+          setPairVolumes(ticker.volumes);
         })
         .catch(() => {
           // Retry quickly on failure so pair rows never stay stuck without a price.
@@ -1103,12 +1118,27 @@ export function FuturesChart() {
 
   const filteredSymbols = useMemo(() => {
     const q = debouncedQuery.trim().toUpperCase();
-    const rank = new Map(promotedSymbols.map((item, index) => [item, index]));
-    const ordered = [...allSymbols].sort((a, b) =>
-      (rank.get(a) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b) ?? Number.MAX_SAFE_INTEGER),
-    );
+    const promotedRank = new Map(promotedSymbols.map((item, index) => [item, index]));
+    // Tier 0 = user-promoted, tier 1 = majors (fixed order), tier 2 = the rest
+    // ranked by 24h quote volume so micro-cap / multiplier pairs sink.
+    const rank = (s: string): [number, number] => {
+      const promoted = promotedRank.get(s);
+      if (promoted != null) return [0, promoted];
+      const major = MAJOR_SYMBOLS.indexOf(s);
+      if (major !== -1) return [1, major];
+      return [2, -(pairVolumes[s] ?? 0)];
+    };
+    const ordered = [...allSymbols].sort((a, b) => {
+      const [ta, ra] = rank(a);
+      const [tb, rb] = rank(b);
+      if (ta !== tb) return ta - tb;
+      if (ra !== rb) return ra - rb;
+      return a.localeCompare(b);
+    });
+
     return q ? ordered.filter((s) => s.includes(q)) : ordered;
-  }, [allSymbols, debouncedQuery, promotedSymbols]);
+  }, [allSymbols, debouncedQuery, promotedSymbols, pairVolumes]);
+
 
   const selectSymbol = useCallback((nextSymbol: string) => {
     if (query.trim()) {
