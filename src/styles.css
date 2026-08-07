@@ -1,0 +1,634 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-bull: var(--bull);
+  --color-bear: var(--bear);
+  --color-gold: var(--gold);
+  --color-panel: var(--panel);
+  --color-panel-foreground: var(--panel-foreground);
+  --font-display: var(--font-display);
+  --font-mono: var(--font-mono);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DESIGN TOKENS
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root {
+  --radius: 0.75rem;
+
+  --background:   #0A1428;
+  --foreground:   #FFFFFF;
+
+  --card:             #0D1F3C;
+  --card-foreground:  #FFFFFF;
+  --panel:            #091629;
+  --panel-foreground: #FFFFFF;
+
+  --popover:            #0D1F3C;
+  --popover-foreground: #FFFFFF;
+
+  --primary:            #2563EB;
+  --primary-foreground: #ffffff;
+
+  --secondary:            #0E2040;
+  --secondary-foreground: #C0D8F0;
+
+  --muted:            #0B1A30;
+  --muted-foreground: #7BA8CC;
+
+  --accent:            #1A3560;
+  --accent-foreground: #FFFFFF;
+
+  --destructive:            #EF4444;
+  --destructive-foreground: #ffffff;
+
+  --border: #1E3A6E;
+  --input:  #102040;
+  --ring:   #2563EB;
+
+  --bull: #10B981;
+  --bear: #EF4444;
+  --gold: #F59E0B;
+
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono:    "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   BASE
+   ═══════════════════════════════════════════════════════════════════════════ */
+@layer base {
+  * {
+    border-color: var(--color-border);
+    box-sizing: border-box;
+  }
+  html {
+    color-scheme: dark;
+    min-height: 100%;
+  }
+  body {
+    min-height: 100%;
+    background: #0A1428;
+    color: var(--color-foreground);
+    font-family: var(--font-display);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background: #2563EB;
+    color: #fff;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SCROLLBARS
+   ═══════════════════════════════════════════════════════════════════════════ */
+body { scrollbar-color: #1E3A6E transparent; scrollbar-width: thin; }
+body::-webkit-scrollbar, *::-webkit-scrollbar { width: 5px; height: 5px; }
+body::-webkit-scrollbar-track, *::-webkit-scrollbar-track { background: transparent; }
+body::-webkit-scrollbar-thumb, *::-webkit-scrollbar-thumb {
+  background: #1E3A6E;
+  border-radius: 999px;
+}
+body::-webkit-scrollbar-thumb:hover, *::-webkit-scrollbar-thumb:hover {
+  background: #2563EB;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GLOBAL TRANSITIONS
+   ═══════════════════════════════════════════════════════════════════════════ */
+button, a, input, select, textarea, [role="button"] {
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease,
+    opacity 150ms ease;
+}
+button:focus-visible, a:focus-visible, input:focus-visible {
+  outline: 2px solid #2563EB;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PAGE LOAD
+   ═══════════════════════════════════════════════════════════════════════════ */
+@keyframes pageReveal {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+body > #root, body > div:first-child {
+  animation: pageReveal 0.3s ease both;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   INPUT / FIELD STYLING
+   ═══════════════════════════════════════════════════════════════════════════ */
+input, select, textarea {
+  background-color: #102040;
+  border-color: #1E3A6E;
+  color: #FFFFFF;
+}
+input::placeholder, textarea::placeholder { color: #7BA8CC; }
+input:hover, select:hover, textarea:hover {
+  border-color: #2563EB;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: #2563EB;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CARD / PANEL SURFACES
+   ═══════════════════════════════════════════════════════════════════════════ */
+.bg-card, .bg-panel {
+  background: #0D1F3C;
+  border-color: #1E3A6E;
+}
+.bg-secondary, .bg-secondary\/40, .bg-secondary\/50, .bg-secondary\/60 {
+  background-color: #0E2040 !important;
+}
+.bg-background { background-color: #0A1428; }
+
+/* Primary button */
+.bg-primary {
+  background: #2563EB;
+  color: #ffffff;
+}
+.bg-primary:hover, .hover\:bg-primary\/90:hover {
+  background: #1D4ED8;
+}
+
+/* Border and text */
+.border-border { border-color: #1E3A6E; }
+.border-input  { border-color: #1E3A6E; }
+.text-primary          { color: #60A5FA; }
+.text-muted-foreground { color: #7BA8CC; }
+.text-foreground       { color: #FFFFFF; }
+.text-bull { color: #10B981; }
+.text-bear { color: #EF4444; }
+
+.shadow-2xl, .shadow-xl, .shadow-lg { box-shadow: none; }
+.backdrop-blur, .backdrop-blur-sm, .backdrop-blur-xl {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HEADER
+   ═══════════════════════════════════════════════════════════════════════════ */
+header {
+  background: #091629;
+  border-color: #1E3A6E;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SIDEBAR
+   ═══════════════════════════════════════════════════════════════════════════ */
+aside {
+  background: #091629;
+  border-color: #1E3A6E;
+}
+aside input {
+  background: #0E2040;
+  border: 1px solid #1E3A6E;
+  border-radius: 10px;
+  color: #FFFFFF;
+  font-size: 0.8125rem;
+}
+aside input:focus {
+  border-color: #2563EB;
+}
+aside button {
+  border-radius: 10px;
+  color: #C0D8F0;
+}
+aside button:hover {
+  background: #1A3560 !important;
+  border-color: #2563EB !important;
+  color: #FFFFFF;
+}
+aside button[class*="bg-primary\/10"] {
+  background: #1A3560 !important;
+  border-color: #2563EB !important;
+  color: #FFFFFF;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   INSTRUMENT BAR
+   ═══════════════════════════════════════════════════════════════════════════ */
+main > div:not(:has(canvas)):first-child {
+  background: #091629;
+  border-color: #1E3A6E;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TIMEFRAME BAR
+   ═══════════════════════════════════════════════════════════════════════════ */
+div[class*="rounded-md border border-border bg-secondary\/40 p-0.5"] {
+  background: #0B1A30 !important;
+  border: 1px solid #1E3A6E !important;
+  border-radius: 10px;
+  padding: 3px;
+}
+div[class*="rounded-md border border-border bg-secondary\/40 p-0.5"] button[class*="bg-primary"] {
+  background: #2563EB !important;
+  color: #ffffff !important;
+  border-radius: 7px;
+}
+div[class*="rounded-md border border-border bg-secondary\/40 p-0.5"] button:not([class*="bg-primary"]) {
+  border-radius: 7px;
+  color: #7BA8CC;
+}
+div[class*="rounded-md border border-border bg-secondary\/40 p-0.5"] button:not([class*="bg-primary"]):hover {
+  background: #1A3560;
+  color: #FFFFFF;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CHART AREA
+   ═══════════════════════════════════════════════════════════════════════════ */
+.min-h-0.flex-1.bg-card {
+  background: #0A1428;
+  border-color: #1E3A6E;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SMC PANEL SLIDE-IN
+   ═══════════════════════════════════════════════════════════════════════════ */
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(24px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+aside.fixed.inset-y-0.right-0 {
+  animation: slideInRight 0.22s ease both;
+  background: #091629;
+  border-color: #1E3A6E;
+}
+aside.fixed.inset-y-0.right-0 > div:first-child {
+  background: #0D1F3C;
+  border-color: #1E3A6E;
+}
+aside.fixed span[class*="flex h-4 w-7"][class*="bg-primary"] {
+  background: #2563EB;
+}
+aside.fixed div.rounded-lg.border.border-border.bg-secondary\/30 {
+  background: #0B1A30;
+  border-color: #1E3A6E;
+  border-radius: 12px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DROPDOWNS & MENUS
+   ═══════════════════════════════════════════════════════════════════════════ */
+@keyframes dropdownReveal {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+div.absolute.right-0.top-full {
+  animation: dropdownReveal 0.15s ease both;
+  background: #0D1F3C;
+  border-color: #1E3A6E;
+  border-radius: 14px;
+}
+div.fixed.z-\[61\] {
+  animation: dropdownReveal 0.15s ease both;
+  background: #0D1F3C;
+  border-color: #1E3A6E;
+  border-radius: 12px;
+}
+div.fixed.z-\[61\] button:hover,
+div.absolute.right-0.top-full button:hover {
+  background: #1A3560;
+  color: #FFFFFF;
+}
+div.absolute.right-0.top-full div.grid button {
+  background: #0E2040;
+  border: 1px solid #1E3A6E;
+  border-radius: 8px;
+  color: #7BA8CC;
+}
+div.absolute.right-0.top-full div.grid button:hover {
+  background: #1A3560;
+  border-color: #2563EB;
+  color: #60A5FA;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DIALOG
+   ═══════════════════════════════════════════════════════════════════════════ */
+@keyframes dialogPop {
+  from { opacity: 0; transform: translate(-50%,-50%) scale(0.96); }
+  to   { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+}
+div.fixed.left-1\/2.top-1\/2.z-\[71\] {
+  animation: dialogPop 0.2s ease both;
+  background: #0D1F3C;
+  border-color: #1E3A6E;
+  border-radius: 16px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TABLES
+   ═══════════════════════════════════════════════════════════════════════════ */
+table {
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  border: 1px solid #1E3A6E;
+  border-radius: 14px;
+  background: #0D1F3C;
+}
+th {
+  background: #091629;
+  color: #7BA8CC;
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 10px 14px;
+}
+td, th { border-color: #1E3A6E; }
+tr:hover td { background: #1A3560; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ERROR BANNER
+   ═══════════════════════════════════════════════════════════════════════════ */
+div[class*="border-bear\/40 bg-bear\/10"] {
+  background: #1F0A0A !important;
+  border-color: #EF4444 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FEED BADGE
+   ═══════════════════════════════════════════════════════════════════════════ */
+button[class*="rounded-full border border-border bg-secondary\/50"] {
+  background: #0E2040 !important;
+  border: 1px solid #1E3A6E !important;
+  border-radius: 999px;
+  padding: 4px 10px;
+  color: #7BA8CC;
+}
+button[class*="rounded-full border border-border bg-secondary\/50"]:hover {
+  border-color: #2563EB !important;
+  color: #FFFFFF;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HEADER AUTH BUTTON
+   ═══════════════════════════════════════════════════════════════════════════ */
+a[class*="border-sky-400\/40 bg-sky-400\/10"] {
+  background: #1A3560 !important;
+  border: 1px solid #2563EB !important;
+  border-radius: 10px;
+  color: #60A5FA !important;
+}
+a[class*="border-sky-400\/40 bg-sky-400\/10"]:hover {
+  background: #2563EB !important;
+  border-color: #2563EB !important;
+  color: #ffffff !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DASHBOARD PAGE
+   ═══════════════════════════════════════════════════════════════════════════ */
+div[class*="rounded-xl border border-primary\/20 bg-primary\/5"] {
+  background: #0D1F3C !important;
+  border: 1px solid #2563EB !important;
+  border-radius: 14px;
+}
+div[class*="rounded-xl border border-border bg-secondary\/50"] {
+  background: #0D1F3C !important;
+  border-radius: 14px;
+  border-color: #1E3A6E !important;
+}
+div[class*="rounded-2xl border border-border bg-card p-6 shadow-sm"] {
+  background: #0D1F3C !important;
+  border-color: #1E3A6E !important;
+}
+div[class*="rounded-2xl border border-border bg-card p-6 shadow-sm"]:hover {
+  border-color: #2563EB !important;
+}
+div[class*="rounded-2xl border border-primary\/40 bg-card p-6"] {
+  background: #0D1F3C !important;
+  border-color: #2563EB !important;
+}
+div[class*="rounded-2xl border border-primary\/40 bg-card p-6"]:hover {
+  border-color: #60A5FA !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   AUTH PAGES
+   ═══════════════════════════════════════════════════════════════════════════ */
+@keyframes authReveal {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+div[class*="auth-fade-up relative z-10 w-full max-w-md"] {
+  animation: authReveal 0.3s ease both;
+  background: #0D1F3C !important;
+  border-color: #1E3A6E !important;
+  border-radius: 20px;
+}
+div[class*="mt-6 flex rounded-lg bg-secondary p-1"] {
+  background: #0B1A30 !important;
+  border: 1px solid #1E3A6E;
+  border-radius: 12px;
+}
+
+@utility auth-bg {
+  position: relative;
+  background: #0A1428;
+  overflow: hidden;
+}
+
+@utility auth-blob {
+  display: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   UTILITY CLASSES
+   ═══════════════════════════════════════════════════════════════════════════ */
+@utility tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+@utility scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: #1E3A6E transparent;
+  &::-webkit-scrollbar { width: 4px; height: 4px; }
+  &::-webkit-scrollbar-thumb {
+    background: #1E3A6E;
+    border-radius: 999px;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: #2563EB;
+  }
+  &::-webkit-scrollbar-track { background: transparent; }
+}
+
+@utility live-dot {
+  animation: livePulse 2s infinite;
+}
+@keyframes livePulse {
+  0%   { opacity: 1; }
+  50%  { opacity: 0.4; }
+  100% { opacity: 1; }
+}
+
+@utility price-flash-up {
+  animation: flashUp 0.5s ease;
+}
+@utility price-flash-down {
+  animation: flashDown 0.5s ease;
+}
+@keyframes flashUp {
+  0%   { color: #10B981; }
+  100% { color: inherit; }
+}
+@keyframes flashDown {
+  0%   { color: #EF4444; }
+  100% { color: inherit; }
+}
+
+@utility skeleton {
+  position: relative;
+  overflow: hidden;
+  background: #0E2040;
+  border-radius: 8px;
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: #1A3560;
+    animation: shimmer 1.6s infinite;
+  }
+}
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+
+@utility transition-smooth {
+  transition: all 0.2s ease;
+}
+@utility auth-fade-up {
+  animation: authFadeUp 0.3s ease both;
+}
+@keyframes authFadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@utility auth-tab-switch {
+  animation: authTabSwitch 0.2s ease both;
+}
+@keyframes authTabSwitch {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@utility field-shake {
+  animation: fieldShake 0.4s ease;
+}
+@keyframes fieldShake {
+  0%, 100% { transform: translateX(0); }
+  20%  { transform: translateX(-6px); }
+  40%  { transform: translateX(6px); }
+  60%  { transform: translateX(-4px); }
+  80%  { transform: translateX(4px); }
+}
+@utility toast-bounce-in {
+  animation: toastBounceIn 0.3s ease both;
+}
+@keyframes toastBounceIn {
+  0%   { opacity: 0; transform: translateY(-8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@utility btn-glow {
+  position: relative; overflow: hidden;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   STAGGERED SECTION ANIMATION
+   ═══════════════════════════════════════════════════════════════════════════ */
+@keyframes sectionFadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+main > * { animation: sectionFadeUp 0.3s ease both; }
+main > *:nth-child(1) { animation-delay: 0.04s; }
+main > *:nth-child(2) { animation-delay: 0.09s; }
+main > *:nth-child(3) { animation-delay: 0.14s; }
+main > *:nth-child(4) { animation-delay: 0.19s; }
+main > *:nth-child(5) { animation-delay: 0.24s; }
+main.mx-auto > * { animation: sectionFadeUp 0.3s ease both; }
+main.mx-auto > *:nth-child(1) { animation-delay: 0.06s; }
+main.mx-auto > *:nth-child(2) { animation-delay: 0.12s; }
+main.mx-auto > *:nth-child(3) { animation-delay: 0.18s; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SIDEBAR PAIR LIST ENTRANCE
+   ═══════════════════════════════════════════════════════════════════════════ */
+@keyframes pairSlideIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+aside:not(.fixed) .scroll-thin > button { animation: pairSlideIn 0.2s ease both; }
+aside:not(.fixed) .scroll-thin > button:nth-child(1)  { animation-delay: 0.03s; }
+aside:not(.fixed) .scroll-thin > button:nth-child(2)  { animation-delay: 0.06s; }
+aside:not(.fixed) .scroll-thin > button:nth-child(3)  { animation-delay: 0.09s; }
+aside:not(.fixed) .scroll-thin > button:nth-child(4)  { animation-delay: 0.12s; }
+aside:not(.fixed) .scroll-thin > button:nth-child(5)  { animation-delay: 0.15s; }
+aside:not(.fixed) .scroll-thin > button:nth-child(n+6) { animation-delay: 0.18s; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TOAST OVERRIDES
+   ═══════════════════════════════════════════════════════════════════════════ */
+[data-sonner-toaster] [data-sonner-toast] {
+  background: #0D1F3C !important;
+  border: 1px solid #1E3A6E !important;
+  border-radius: 14px !important;
+  color: #FFFFFF !important;
+}
+[data-sonner-toaster] [data-sonner-toast][data-type="success"] { border-color: #10B981 !important; }
+[data-sonner-toaster] [data-sonner-toast][data-type="error"]   { border-color: #EF4444 !important; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 1023px) {
+  aside:not(.fixed) { border-bottom: 1px solid #1E3A6E; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
