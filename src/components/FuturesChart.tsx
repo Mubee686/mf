@@ -1119,20 +1119,23 @@ export function FuturesChart() {
   const filteredSymbols = useMemo(() => {
     const q = debouncedQuery.trim().toUpperCase();
     const promotedRank = new Map(promotedSymbols.map((item, index) => [item, index]));
-    const score = (s: string) => {
+    // Tier 0 = user-promoted, tier 1 = majors (fixed order), tier 2 = the rest
+    // ranked by 24h quote volume so micro-cap / multiplier pairs sink.
+    const rank = (s: string): [number, number] => {
       const promoted = promotedRank.get(s);
-      if (promoted != null) return -1_000_000 + promoted;
+      if (promoted != null) return [0, promoted];
       const major = MAJOR_SYMBOLS.indexOf(s);
-      if (major !== -1) return -100_000 + major;
-      // Everything else: highest 24h quote volume first; multiplier-named
-      // micro-cap pairs (1000PEPEUSDT, 1000000BOBUSDT…) sink automatically.
-      const vol = pairVolumes[s] ?? 0;
-      return -vol;
+      if (major !== -1) return [1, major];
+      return [2, -(pairVolumes[s] ?? 0)];
     };
     const ordered = [...allSymbols].sort((a, b) => {
-      const d = score(a) - score(b);
-      return d !== 0 ? d : a.localeCompare(b);
+      const [ta, ra] = rank(a);
+      const [tb, rb] = rank(b);
+      if (ta !== tb) return ta - tb;
+      if (ra !== rb) return ra - rb;
+      return a.localeCompare(b);
     });
+
     return q ? ordered.filter((s) => s.includes(q)) : ordered;
   }, [allSymbols, debouncedQuery, promotedSymbols, pairVolumes]);
 
