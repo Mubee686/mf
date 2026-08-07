@@ -384,6 +384,7 @@ export function FuturesChart() {
           if (cancelled) return;
           setChanges(ticker.changes);
           setPairPrices(ticker.prices);
+          setPairVolumes(ticker.volumes);
         })
         .catch(() => {
           // Retry quickly on failure so pair rows never stay stuck without a price.
