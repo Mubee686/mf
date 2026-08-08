@@ -878,12 +878,9 @@ export function FuturesChart() {
         let lastFailure: unknown;
         for (let attempt = 0; attempt < 4; attempt += 1) {
           try {
-            klines = await fetchKlines(
-              requestedSymbol,
-              requestedTimeframe,
-              nativeBatchLimit(futuresIntervalPlan(requestedTimeframe)),
-              controller.signal,
-            );
+            const plan = futuresIntervalPlan(requestedTimeframe);
+            const initialLimit = plan.aggregateSeconds ? nativeBatchLimit(plan) : 500;
+            klines = await fetchKlines(requestedSymbol, requestedTimeframe, initialLimit, controller.signal);
             if (klines.length > 0) break;
           } catch (failure) {
             lastFailure = failure;
