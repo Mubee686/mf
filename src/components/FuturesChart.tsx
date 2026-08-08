@@ -40,7 +40,15 @@ import { SlowConnectionBanner } from "@/components/SlowConnectionBanner";
 import { reportRequestLatency } from "@/lib/network-status";
 import { useAuthSession } from "@/hooks/use-auth";
 import { useCandleTimer } from "@/hooks/use-candle-timer";
+import { useTimeframeBar } from "@/hooks/use-timeframes";
 import type { Candle } from "@/lib/forex";
+import { DEFAULT_TIMEFRAME_IDS, QUICK_TIMEFRAME_IDS, getTimeframe } from "@/lib/timeframes";
+import {
+  aggregateFuturesCandles,
+  futuresIntervalPlan,
+  nativeBatchLimit,
+  timeframeSixMonthCutoff,
+} from "@/lib/futures-timeframes";
 import { cn } from "@/lib/utils";
 import {
   TOOLS,
@@ -65,26 +73,7 @@ const DEFAULT_SYMBOLS = [
   "MATICUSDT", "LTCUSDT", "BCHUSDT", "UNIUSDT", "ATOMUSDT",
 ];
 
-const INTERVALS = [
-  { label: "1m",  value: "1m"  },
-  { label: "5m",  value: "5m"  },
-  { label: "15m", value: "15m" },
-  { label: "30m", value: "30m" },
-  { label: "1H",  value: "1h"  },
-  { label: "4H",  value: "4h"  },
-  { label: "1D",  value: "1d"  },
-];
-
-const EXTRA_INTERVALS = [
-  { label: "3m", value: "3m" },
-  { label: "2H", value: "2h" },
-  { label: "6H", value: "6h" },
-  { label: "8H", value: "8h" },
-  { label: "12H", value: "12h" },
-  { label: "3D", value: "3d" },
-  { label: "1W", value: "1w" },
-  { label: "1M", value: "1M" },
-];
+const LIVE_WINDOW_BARS = 110;
 
 // ─── chart palette (matches site theme) ──────────────────────────────────────
 
@@ -205,6 +194,10 @@ export function FuturesChart() {
   const historyRequestRef = useRef(0);
   const historyAbortRef = useRef<AbortController | null>(null);
   const foregroundLoadingRef = useRef(true);
+  const olderLoadingRef = useRef(false);
+  const olderAbortRef = useRef<AbortController | null>(null);
+  const historyStartRef = useRef<number | null>(null);
+  const reachedHistoryLimitRef = useRef(false);
 
   // ── state ─────────────────────────────────────────────────────────────────
   const [allSymbols,   setAllSymbols]   = useState<string[]>(DEFAULT_SYMBOLS);
@@ -228,6 +221,8 @@ export function FuturesChart() {
   const [legend, setLegend] = useState<Candle | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [timeframePickerOpen, setTimeframePickerOpen] = useState(false);
+  const [customInput, setCustomInput] = useState("");
+  const [customError, setCustomError] = useState("");
   const [membershipActive, setMembershipActive] = useState(false);
   const [changes, setChanges] = useState<Record<string, number>>({});
   const [pairPrices, setPairPrices] = useState<Record<string, number>>({});
@@ -237,13 +232,17 @@ export function FuturesChart() {
   const isScrolledBackRef = useRef(false);
   const [isSyncingLive, setIsSyncingLive] = useState(false);
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timeframeBar = useTimeframeBar();
+  const intervalPlan = useMemo(() => futuresIntervalPlan(timeframe), [timeframe]);
   const fetchKlines = useCallback(
-    async (requestedSymbol: string, requestedInterval: string, limit = 500, signal?: AbortSignal) => {
+    async (requestedSymbol: string, requestedInterval: string, limit = 500, signal?: AbortSignal, endTime?: number) => {
+      const plan = futuresIntervalPlan(requestedInterval);
       const params = new URLSearchParams({
         symbol: requestedSymbol,
-        interval: requestedInterval,
+        interval: plan.binanceInterval,
         limit: String(limit),
       });
+      if (endTime != null) params.set("endTime", String(endTime));
       const startedAt = Date.now();
       let response: Response;
       try {
@@ -253,7 +252,7 @@ export function FuturesChart() {
       }
       if (!response.ok) throw new Error(`Failed to load chart data (${response.status})`);
       const rows = (await response.json()) as unknown[][];
-      return rows
+      const parsed = rows
         .map((row) => ({
           time: Math.floor(Number(row[0]) / 1000),
           open: Number(row[1]),
@@ -267,6 +266,7 @@ export function FuturesChart() {
           candle.open <= candle.high && candle.open >= candle.low &&
           candle.close <= candle.high && candle.close >= candle.low,
         ) as Candle[];
+      return aggregateFuturesCandles(parsed, plan);
     },
     [],
   );
@@ -324,13 +324,15 @@ export function FuturesChart() {
   }, []);
 
   const backToLive = useCallback(() => {
-    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    if (syncTimerRef.current) {
+      clearTimeout(syncTimerRef.current);
+      syncTimerRef.current = null;
+    }
     setIsSyncingLive(true);
-    let stableChecks = 0;
     const sync = async () => {
       const requestedKey = `${symbol}|${timeframe}`;
       try {
-        const latest = await fetchKlines(symbol, timeframe);
+        const latest = await fetchKlines(symbol, timeframe, nativeBatchLimit(futuresIntervalPlan(timeframe)));
         if (selectionKeyRef.current !== requestedKey) return;
         const candle = latest[latest.length - 1];
         if (candle) {
@@ -339,22 +341,20 @@ export function FuturesChart() {
           setLivePrice(candle.close);
         }
       } catch {
-        // Keep retrying until the live viewport and latest server candle agree.
+        // Existing live data remains usable if the one-shot refresh fails.
       }
       const scale = chartRef.current?.timeScale();
-      scale?.scrollToRealTime();
-      const range = scale?.getVisibleLogicalRange();
       const lastIndex = candlesRef.current.length - 1;
-      const caughtUp = Boolean(range && lastIndex >= 0 && range.to >= lastIndex - 0.25);
-      stableChecks = caughtUp ? stableChecks + 1 : 0;
-      if (stableChecks >= 3) {
-        setIsScrolledBack(false);
-        isScrolledBackRef.current = false;
-        setIsSyncingLive(false);
-        syncTimerRef.current = null;
-        return;
+      if (scale && lastIndex >= 0) {
+        scale.setVisibleLogicalRange({
+          from: Math.max(0, lastIndex - LIVE_WINDOW_BARS + 1),
+          to: lastIndex + 6,
+        });
       }
-      syncTimerRef.current = setTimeout(sync, 300);
+      chartRef.current?.priceScale("right").applyOptions({ autoScale: true });
+      setIsScrolledBack(false);
+      isScrolledBackRef.current = false;
+      setIsSyncingLive(false);
     };
     void sync();
   }, [symbol, timeframe]);
