@@ -1494,7 +1494,7 @@ export function FuturesChart() {
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
 
         {/* ── Toolbar ───────────────────────────────────────────────────────── */}
-        <div className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2 border-b border-border bg-panel/60 px-4 py-2">
+        <div className="relative z-30 flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2 border-b border-border bg-panel/60 px-4 py-2">
 
           {/* Active symbol + live price + candle countdown */}
           <div className="flex items-center gap-2">
