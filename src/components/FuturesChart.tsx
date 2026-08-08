@@ -1316,7 +1316,14 @@ export function FuturesChart() {
     liveCloseRef.current = null;
     liveCandleRef.current = null;
     candlesRef.current = [];
+    const nextPriceFormat = symbolPriceFormats[nextSymbol];
+    if (nextPriceFormat) {
+      seriesRef.current?.applyOptions({
+        priceFormat: { type: "price", precision: nextPriceFormat.precision, minMove: nextPriceFormat.minMove },
+      });
+    }
     seriesRef.current?.setData([]);
+    chartRef.current?.priceScale("right").applyOptions({ autoScale: true });
     setBaseCandles([]);
     setLiveCandle(null);
     setLegend(null);
@@ -1325,7 +1332,7 @@ export function FuturesChart() {
     setLoading(true);
     setSymbol(nextSymbol);
     setLivePrice(null);
-  }, [query, symbol, timeframe]);
+  }, [query, symbol, symbolPriceFormats, timeframe]);
 
   const selectTimeframe = useCallback((nextTimeframe: string) => {
     if (nextTimeframe === timeframe) return;
@@ -1342,6 +1349,7 @@ export function FuturesChart() {
     liveCandleRef.current = null;
     candlesRef.current = [];
     seriesRef.current?.setData([]);
+    chartRef.current?.priceScale("right").applyOptions({ autoScale: true });
     setBaseCandles([]);
     setLiveCandle(null);
     setLivePrice(null);
@@ -1351,6 +1359,29 @@ export function FuturesChart() {
     setLoading(true);
     setTimeframe(nextTimeframe);
   }, [symbol, timeframe]);
+
+  useEffect(() => {
+    if (timeframeBar.hydrated && timeframeBar.ids.length > 0 && !timeframeBar.ids.includes(timeframe)) {
+      selectTimeframe(timeframeBar.ids[0]);
+    }
+  }, [selectTimeframe, timeframe, timeframeBar.hydrated, timeframeBar.ids]);
+
+  const addCustomTimeframe = useCallback(() => {
+    const id = timeframeBar.add(customInput);
+    if (!id) {
+      setCustomError("Invalid format. Try 2m, 45m, 3h, 2d");
+      return;
+    }
+    selectTimeframe(id);
+    setCustomInput("");
+    setCustomError("");
+    setTimeframePickerOpen(false);
+  }, [customInput, selectTimeframe, timeframeBar]);
+
+  const pinnableTimeframes = useMemo(
+    () => [...DEFAULT_TIMEFRAME_IDS, ...QUICK_TIMEFRAME_IDS].filter((id) => !timeframeBar.ids.includes(id)),
+    [timeframeBar.ids],
+  );
 
   // ── windowed rendering: only render a slice of the (500+) pair list ───────
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
@@ -1464,7 +1495,7 @@ export function FuturesChart() {
           <div className="flex items-center gap-2">
             <span className="text-lg font-bold tracking-tight">{symbol}</span>
             <span className="rounded bg-secondary/60 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
-              {INTERVALS.find((interval) => interval.value === timeframe)?.label ?? timeframe}
+              {getTimeframe(timeframe).label}
             </span>
             <span className="flex items-center gap-1 rounded border border-border bg-secondary/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
               <Timer className="h-2.5 w-2.5 shrink-0" />
@@ -1508,17 +1539,17 @@ export function FuturesChart() {
 
             {/* Timeframe buttons */}
             <div className="scroll-thin flex max-w-[60vw] items-center gap-0.5 overflow-x-auto rounded-md border border-border bg-secondary/40 p-0.5 lg:max-w-none">
-              {INTERVALS.map(({ label, value }) => (
+              {timeframeBar.items.map((item) => (
                 <button
-                  key={value}
-                  onClick={() => selectTimeframe(value)}
+                  key={item.id}
+                  onClick={() => selectTimeframe(item.id)}
                   className={`shrink-0 rounded px-2 py-1 text-xs font-semibold transition-colors ${
-                    timeframe === value
+                    timeframe === item.id
                       ? "bg-primary text-primary-foreground"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  {label}
+                  {item.label}
                 </button>
               ))}
             </div>
@@ -1539,25 +1570,54 @@ export function FuturesChart() {
                 <Plus className="h-3.5 w-3.5" />
               </button>
               {timeframePickerOpen && (
-                <div className="absolute right-0 top-full z-50 mt-1 grid w-48 grid-cols-4 gap-1 rounded-md border border-[#1E3A6E] bg-[#091629] p-2 shadow-2xl">
-                  {EXTRA_INTERVALS.map(({ label, value }) => (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => {
-                        selectTimeframe(value);
-                        setTimeframePickerOpen(false);
-                      }}
-                      className={cn(
-                        "rounded px-2 py-1.5 text-xs font-semibold transition-colors",
-                        timeframe === value
-                          ? "bg-[#2563EB] text-white"
-                          : "bg-[#0D1F3C] text-[#7BA8CC] hover:bg-[#1A3560] hover:text-white",
-                      )}
-                    >
-                      {label}
-                    </button>
-                  ))}
+                <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-md border border-border bg-panel shadow-2xl">
+                  <div className="border-b border-border px-3 py-2 text-[10px] font-semibold uppercase text-muted-foreground">
+                    Pin a timeframe
+                  </div>
+                  <div className="grid grid-cols-5 gap-1 p-3">
+                    {pinnableTimeframes.length === 0 && (
+                      <span className="col-span-5 text-[11px] text-muted-foreground">All presets pinned.</span>
+                    )}
+                    {pinnableTimeframes.map((id) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => {
+                          timeframeBar.pin(id);
+                          selectTimeframe(id);
+                          setTimeframePickerOpen(false);
+                        }}
+                        className="rounded bg-secondary/50 px-1.5 py-1 text-xs font-medium text-muted-foreground hover:bg-primary/20 hover:text-primary"
+                      >
+                        {getTimeframe(id).label}
+                      </button>
+                    ))}
+                  </div>
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      addCustomTimeframe();
+                    }}
+                    className="border-t border-border p-3"
+                  >
+                    <div className="flex gap-2">
+                      <input
+                        value={customInput}
+                        onChange={(event) => {
+                          setCustomInput(event.target.value);
+                          setCustomError("");
+                        }}
+                        placeholder="Custom e.g. 45m, 3h, 2d"
+                        aria-label="Custom timeframe"
+                        className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs outline-none focus:border-primary"
+                      />
+                      <button type="submit" className="rounded bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground">
+                        Add
+                      </button>
+                    </div>
+                    {customError && <p className="mt-1 text-[10px] text-bear">{customError}</p>}
+                    <p className="mt-1 text-[10px] text-muted-foreground/60">Units: m h d w mo</p>
+                  </form>
                 </div>
               )}
             </div>
