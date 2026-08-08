@@ -20,6 +20,13 @@ export const Route = createFileRoute("/futures")({
         content:
           "Real-time crypto futures candlestick charts with full SMC analysis. BTCUSDT, ETHUSDT and 100+ pairs.",
       },
+      { property: "og:title", content: "MF SMC Futures — Crypto Futures Chart" },
+      {
+        property: "og:description",
+        content: "Real-time crypto futures charts with SMC analysis across major USDT perpetual markets.",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
     ],
   }),
   component: FuturesPage,

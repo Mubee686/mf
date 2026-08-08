@@ -31,11 +31,13 @@ export const Route = createFileRoute("/api/public/futures/klines")({
         const interval = url.searchParams.get("interval") ?? "1m";
         const limitRaw = parseInt(url.searchParams.get("limit") ?? "500", 10);
         const limit = Math.min(1500, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 500));
+        const endTimeRaw = Number(url.searchParams.get("endTime"));
+        const endTime = Number.isFinite(endTimeRaw) && endTimeRaw > 0 ? Math.floor(endTimeRaw) : null;
         if (!VALID_SYMBOL.test(symbol) || !VALID_INTERVALS.has(interval)) {
           return Response.json({ error: "Invalid market request" }, { status: 400, headers: CORS });
         }
 
-        const key = `${symbol}|${interval}|${limit}`;
+        const key = `${symbol}|${interval}|${limit}|${endTime ?? "latest"}`;
         const hit = cache.get(key);
         if (hit && Date.now() - hit.at < TTL_MS) {
           return new Response(hit.body, {
@@ -45,7 +47,8 @@ export const Route = createFileRoute("/api/public/futures/klines")({
         }
 
         try {
-          const path = `/fapi/v1/klines?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${limit}`;
+          const endTimeParam = endTime == null ? "" : `&endTime=${endTime}`;
+          const path = `/fapi/v1/klines?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${limit}${endTimeParam}`;
           let lastStatus = 502;
           let lastBody = JSON.stringify({ error: "Binance Futures is temporarily unavailable" });
           for (const origin of ["https://fapi.binance.com", "https://www.binance.com"]) {

@@ -40,7 +40,15 @@ import { SlowConnectionBanner } from "@/components/SlowConnectionBanner";
 import { reportRequestLatency } from "@/lib/network-status";
 import { useAuthSession } from "@/hooks/use-auth";
 import { useCandleTimer } from "@/hooks/use-candle-timer";
+import { useTimeframeBar } from "@/hooks/use-timeframes";
 import type { Candle } from "@/lib/forex";
+import { DEFAULT_TIMEFRAME_IDS, QUICK_TIMEFRAME_IDS, getTimeframe } from "@/lib/timeframes";
+import {
+  aggregateFuturesCandles,
+  futuresIntervalPlan,
+  nativeBatchLimit,
+  timeframeSixMonthCutoff,
+} from "@/lib/futures-timeframes";
 import { cn } from "@/lib/utils";
 import {
   TOOLS,
@@ -65,26 +73,7 @@ const DEFAULT_SYMBOLS = [
   "MATICUSDT", "LTCUSDT", "BCHUSDT", "UNIUSDT", "ATOMUSDT",
 ];
 
-const INTERVALS = [
-  { label: "1m",  value: "1m"  },
-  { label: "5m",  value: "5m"  },
-  { label: "15m", value: "15m" },
-  { label: "30m", value: "30m" },
-  { label: "1H",  value: "1h"  },
-  { label: "4H",  value: "4h"  },
-  { label: "1D",  value: "1d"  },
-];
-
-const EXTRA_INTERVALS = [
-  { label: "3m", value: "3m" },
-  { label: "2H", value: "2h" },
-  { label: "6H", value: "6h" },
-  { label: "8H", value: "8h" },
-  { label: "12H", value: "12h" },
-  { label: "3D", value: "3d" },
-  { label: "1W", value: "1w" },
-  { label: "1M", value: "1M" },
-];
+const LIVE_WINDOW_BARS = 110;
 
 // ─── chart palette (matches site theme) ──────────────────────────────────────
 
@@ -205,6 +194,11 @@ export function FuturesChart() {
   const historyRequestRef = useRef(0);
   const historyAbortRef = useRef<AbortController | null>(null);
   const foregroundLoadingRef = useRef(true);
+  const olderLoadingRef = useRef(false);
+  const olderAbortRef = useRef<AbortController | null>(null);
+  const historyStartRef = useRef<number | null>(null);
+  const reachedHistoryLimitRef = useRef(false);
+  const loadOlderRef = useRef<() => void>(() => {});
 
   // ── state ─────────────────────────────────────────────────────────────────
   const [allSymbols,   setAllSymbols]   = useState<string[]>(DEFAULT_SYMBOLS);
@@ -228,6 +222,8 @@ export function FuturesChart() {
   const [legend, setLegend] = useState<Candle | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [timeframePickerOpen, setTimeframePickerOpen] = useState(false);
+  const [customInput, setCustomInput] = useState("");
+  const [customError, setCustomError] = useState("");
   const [membershipActive, setMembershipActive] = useState(false);
   const [changes, setChanges] = useState<Record<string, number>>({});
   const [pairPrices, setPairPrices] = useState<Record<string, number>>({});
@@ -237,23 +233,26 @@ export function FuturesChart() {
   const isScrolledBackRef = useRef(false);
   const [isSyncingLive, setIsSyncingLive] = useState(false);
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timeframeBar = useTimeframeBar();
   const fetchKlines = useCallback(
-    async (requestedSymbol: string, requestedInterval: string, limit = 500, signal?: AbortSignal) => {
+    async (requestedSymbol: string, requestedInterval: string, limit = 500, signal?: AbortSignal, endTime?: number) => {
+      const plan = futuresIntervalPlan(requestedInterval);
       const params = new URLSearchParams({
         symbol: requestedSymbol,
-        interval: requestedInterval,
+        interval: plan.binanceInterval,
         limit: String(limit),
       });
+      if (endTime != null) params.set("endTime", String(endTime));
       const startedAt = Date.now();
       let response: Response;
       try {
-        response = await fetch(`https://cgirdlkuarpzrpaybrkb.supabase.co/functions/v1/hyper-task?type=klines&${params}`, { signal });
+        response = await fetch(`/api/public/futures/klines?${params}`, { signal });
       } finally {
         if (!signal?.aborted) reportRequestLatency(Date.now() - startedAt);
       }
       if (!response.ok) throw new Error(`Failed to load chart data (${response.status})`);
       const rows = (await response.json()) as unknown[][];
-      return rows
+      const parsed = rows
         .map((row) => ({
           time: Math.floor(Number(row[0]) / 1000),
           open: Number(row[1]),
@@ -267,9 +266,28 @@ export function FuturesChart() {
           candle.open <= candle.high && candle.open >= candle.low &&
           candle.close <= candle.high && candle.close >= candle.low,
         ) as Candle[];
+      return aggregateFuturesCandles(parsed, plan);
     },
     [],
   );
+
+  const mergeCandles = useCallback((older: Candle[], newer: Candle[]) => {
+    const merged = new Map<number, Candle>();
+    for (const candle of older) merged.set(candle.time, { ...candle });
+    for (const candle of newer) {
+      const previous = merged.get(candle.time);
+      merged.set(candle.time, previous
+        ? {
+            time: candle.time,
+            open: previous.open,
+            high: Math.max(previous.high, candle.high),
+            low: Math.min(previous.low, candle.low),
+            close: candle.close,
+          }
+        : { ...candle });
+    }
+    return [...merged.values()].sort((a, b) => a.time - b.time);
+  }, []);
 
   const fetchTicker = useCallback(async () => {
     const response = await fetch("https://cgirdlkuarpzrpaybrkb.supabase.co/functions/v1/hyper-task?type=ticker");
@@ -324,13 +342,15 @@ export function FuturesChart() {
   }, []);
 
   const backToLive = useCallback(() => {
-    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    if (syncTimerRef.current) {
+      clearTimeout(syncTimerRef.current);
+      syncTimerRef.current = null;
+    }
     setIsSyncingLive(true);
-    let stableChecks = 0;
     const sync = async () => {
       const requestedKey = `${symbol}|${timeframe}`;
       try {
-        const latest = await fetchKlines(symbol, timeframe);
+        const latest = await fetchKlines(symbol, timeframe, nativeBatchLimit(futuresIntervalPlan(timeframe)));
         if (selectionKeyRef.current !== requestedKey) return;
         const candle = latest[latest.length - 1];
         if (candle) {
@@ -339,22 +359,20 @@ export function FuturesChart() {
           setLivePrice(candle.close);
         }
       } catch {
-        // Keep retrying until the live viewport and latest server candle agree.
+        // Existing live data remains usable if the one-shot refresh fails.
       }
       const scale = chartRef.current?.timeScale();
-      scale?.scrollToRealTime();
-      const range = scale?.getVisibleLogicalRange();
       const lastIndex = candlesRef.current.length - 1;
-      const caughtUp = Boolean(range && lastIndex >= 0 && range.to >= lastIndex - 0.25);
-      stableChecks = caughtUp ? stableChecks + 1 : 0;
-      if (stableChecks >= 3) {
-        setIsScrolledBack(false);
-        isScrolledBackRef.current = false;
-        setIsSyncingLive(false);
-        syncTimerRef.current = null;
-        return;
+      if (scale && lastIndex >= 0) {
+        scale.setVisibleLogicalRange({
+          from: Math.max(0, lastIndex - LIVE_WINDOW_BARS + 1),
+          to: lastIndex + 6,
+        });
       }
-      syncTimerRef.current = setTimeout(sync, 300);
+      chartRef.current?.priceScale("right").applyOptions({ autoScale: true });
+      setIsScrolledBack(false);
+      isScrolledBackRef.current = false;
+      setIsSyncingLive(false);
     };
     void sync();
   }, [symbol, timeframe]);
@@ -763,6 +781,8 @@ export function FuturesChart() {
     const onRange = () => {
       drawOverlay.current();
       updateScrolledState();
+      const range = chart.timeScale().getVisibleLogicalRange();
+      if (range && range.from < 75) loadOlderRef.current();
     };
     chart.timeScale().subscribeVisibleLogicalRangeChange(onRange);
 
@@ -772,8 +792,7 @@ export function FuturesChart() {
     let rafId: number;
     let lastRafY: number | null | undefined = undefined;
     let lastRafAt = 0;
-    // Redraw at most ~5x/second: enough to look live, cheap on low-end phones.
-    const RAF_MIN_INTERVAL = 200;
+    const RAF_MIN_INTERVAL = 16;
     const rafLoop = () => {
       if (document.hidden) {
         rafId = requestAnimationFrame(rafLoop);
@@ -789,7 +808,7 @@ export function FuturesChart() {
       const close = liveCloseRef.current ?? candlesRef.current[candlesRef.current.length - 1]?.close;
       if (s && close != null) {
         const y = s.priceToCoordinate(close);
-        if (y !== lastRafY) {
+        if (y != null && (lastRafY == null || Math.abs(y - lastRafY) >= 0.1)) {
           lastRafY = y;
           setPriceY(y ?? null);
           setScaleWidth(chart.priceScale("right").width());
@@ -859,7 +878,9 @@ export function FuturesChart() {
         let lastFailure: unknown;
         for (let attempt = 0; attempt < 4; attempt += 1) {
           try {
-            klines = await fetchKlines(requestedSymbol, requestedTimeframe, 500, controller.signal);
+            const plan = futuresIntervalPlan(requestedTimeframe);
+            const initialLimit = plan.aggregateSeconds ? nativeBatchLimit(plan) : 500;
+            klines = await fetchKlines(requestedSymbol, requestedTimeframe, initialLimit, controller.signal);
             if (klines.length > 0) break;
           } catch (failure) {
             lastFailure = failure;
@@ -877,6 +898,7 @@ export function FuturesChart() {
             ? lastFailure
             : new Error(`No candle data returned for ${requestedSymbol}`);
         }
+        historyStartRef.current = klines[0]?.time ?? null;
         setBaseCandles(klines);
         const latest = klines[klines.length - 1];
         liveCloseRef.current = latest.close;
@@ -906,10 +928,65 @@ export function FuturesChart() {
   const loadHistoryRef = useRef(loadHistory);
   loadHistoryRef.current = loadHistory;
 
+  const loadOlder = useCallback(async () => {
+    if (olderLoadingRef.current || reachedHistoryLimitRef.current || foregroundLoadingRef.current) return;
+    const oldest = historyStartRef.current ?? baseCandles[0]?.time;
+    if (!oldest) return;
+    const cutoff = timeframeSixMonthCutoff();
+    if (oldest <= cutoff) {
+      reachedHistoryLimitRef.current = true;
+      return;
+    }
+    olderLoadingRef.current = true;
+    const requestedKey = `${symbol}|${timeframe}`;
+    const controller = new AbortController();
+    olderAbortRef.current = controller;
+    try {
+      const older = await fetchKlines(
+        symbol,
+        timeframe,
+        nativeBatchLimit(futuresIntervalPlan(timeframe)),
+        controller.signal,
+        oldest * 1000 - 1,
+      );
+      if (controller.signal.aborted || selectionKeyRef.current !== requestedKey || older.length === 0) return;
+      const bounded = older.filter((candle) => candle.time >= cutoff);
+      if (bounded.length === 0) {
+        reachedHistoryLimitRef.current = true;
+        return;
+      }
+      const currentRange = chartRef.current?.timeScale().getVisibleLogicalRange();
+      setBaseCandles((current) => {
+        const next = mergeCandles(bounded, current);
+        const added = next.length - current.length;
+        historyStartRef.current = next[0]?.time ?? oldest;
+        if ((next[0]?.time ?? Infinity) <= cutoff || added === 0) reachedHistoryLimitRef.current = true;
+        requestAnimationFrame(() => {
+          if (currentRange && added > 0 && selectionKeyRef.current === requestedKey) {
+            chartRef.current?.timeScale().setVisibleLogicalRange({
+              from: currentRange.from + added,
+              to: currentRange.to + added,
+            });
+          }
+        });
+        return next;
+      });
+    } catch {
+      // Retry when the user approaches the edge again.
+    } finally {
+      if (olderAbortRef.current === controller) olderAbortRef.current = null;
+      olderLoadingRef.current = false;
+    }
+  }, [baseCandles, fetchKlines, mergeCandles, symbol, timeframe]);
+  loadOlderRef.current = () => void loadOlder();
+
 
 
   useEffect(() => {
     selectionKeyRef.current = `${symbol}|${timeframe}`;
+    historyStartRef.current = null;
+    reachedHistoryLimitRef.current = false;
+    olderAbortRef.current?.abort();
     void loadHistory(false);
     return () => {
       historyAbortRef.current?.abort();
@@ -945,8 +1022,14 @@ export function FuturesChart() {
     if (fitKeyRef.current !== key) {
       fitKeyRef.current = key;
       const scale = chartRef.current?.timeScale();
-      scale?.fitContent();
-      scale?.scrollToRealTime();
+      const lastIndex = baseCandles.length - 1;
+      if (scale && lastIndex >= 0) {
+        scale.setVisibleLogicalRange({
+          from: Math.max(0, lastIndex - LIVE_WINDOW_BARS + 1),
+          to: lastIndex + 6,
+        });
+      }
+      chartRef.current?.priceScale("right").applyOptions({ autoScale: true });
       isScrolledBackRef.current = false;
       setIsScrolledBack(false);
     }
@@ -970,6 +1053,7 @@ export function FuturesChart() {
     let attempt = 0;
     let endpointIndex = 0;
     const socketKey = `${symbol}|${timeframe}`;
+    const streamPlan = futuresIntervalPlan(timeframe);
     const streamOrigins = ["wss://fstream.binance.com", "wss://fstream.binancefuture.com"];
 
     // ── Throttled paint: the socket can emit many frames per second, but the
@@ -995,8 +1079,25 @@ export function FuturesChart() {
       setLiveCandle(c);
     };
 
-    const applyCandle = (c: Candle) => {
+    const applyCandle = (raw: Candle) => {
       if (disposed || selectionKeyRef.current !== socketKey) return;
+      let c = raw;
+      if (streamPlan.aggregateSeconds) {
+        const bucket = Math.floor(raw.time / streamPlan.aggregateSeconds) * streamPlan.aggregateSeconds;
+        const lastBase = candlesRef.current[candlesRef.current.length - 1];
+        const current = liveCandleRef.current?.time === bucket
+          ? liveCandleRef.current
+          : lastBase?.time === bucket ? lastBase : null;
+        c = current
+          ? {
+              time: bucket,
+              open: current.open,
+              high: Math.max(current.high, raw.high),
+              low: Math.min(current.low, raw.low),
+              close: raw.close,
+            }
+          : { ...raw, time: bucket };
+      }
       if (![c.time, c.open, c.high, c.low, c.close].every(Number.isFinite)) return;
       if (c.high < c.low || c.open > c.high || c.open < c.low || c.close > c.high || c.close < c.low) return;
       lastDataAt = Date.now();
@@ -1019,7 +1120,11 @@ export function FuturesChart() {
       if (disposed || fallbackInFlight || selectionKeyRef.current !== socketKey) return;
       fallbackInFlight = true;
       try {
-        const latest = await fetchKlines(symbol, timeframe, 2);
+        const latest = await fetchKlines(
+          symbol,
+          timeframe,
+          streamPlan.aggregateSeconds ? nativeBatchLimit(streamPlan) : 2,
+        );
         if (disposed || selectionKeyRef.current !== socketKey) return;
         const candle = latest[latest.length - 1];
         if (candle) applyCandle(candle);
@@ -1040,7 +1145,7 @@ export function FuturesChart() {
 
     const connect = () => {
       if (disposed) return;
-      const stream = `${symbol.toLowerCase()}@kline_${timeframe}`;
+      const stream = `${symbol.toLowerCase()}@kline_${streamPlan.binanceInterval}`;
       try {
         ws = new WebSocket(`${streamOrigins[endpointIndex]}/ws/${stream}`);
       } catch {
@@ -1213,7 +1318,14 @@ export function FuturesChart() {
     liveCloseRef.current = null;
     liveCandleRef.current = null;
     candlesRef.current = [];
+    const nextPriceFormat = symbolPriceFormats[nextSymbol];
+    if (nextPriceFormat) {
+      seriesRef.current?.applyOptions({
+        priceFormat: { type: "price", precision: nextPriceFormat.precision, minMove: nextPriceFormat.minMove },
+      });
+    }
     seriesRef.current?.setData([]);
+    chartRef.current?.priceScale("right").applyOptions({ autoScale: true });
     setBaseCandles([]);
     setLiveCandle(null);
     setLegend(null);
@@ -1222,7 +1334,7 @@ export function FuturesChart() {
     setLoading(true);
     setSymbol(nextSymbol);
     setLivePrice(null);
-  }, [query, symbol, timeframe]);
+  }, [query, symbol, symbolPriceFormats, timeframe]);
 
   const selectTimeframe = useCallback((nextTimeframe: string) => {
     if (nextTimeframe === timeframe) return;
@@ -1239,6 +1351,7 @@ export function FuturesChart() {
     liveCandleRef.current = null;
     candlesRef.current = [];
     seriesRef.current?.setData([]);
+    chartRef.current?.priceScale("right").applyOptions({ autoScale: true });
     setBaseCandles([]);
     setLiveCandle(null);
     setLivePrice(null);
@@ -1248,6 +1361,29 @@ export function FuturesChart() {
     setLoading(true);
     setTimeframe(nextTimeframe);
   }, [symbol, timeframe]);
+
+  useEffect(() => {
+    if (timeframeBar.hydrated && timeframeBar.ids.length > 0 && !timeframeBar.ids.includes(timeframe)) {
+      selectTimeframe(timeframeBar.ids[0]);
+    }
+  }, [selectTimeframe, timeframe, timeframeBar.hydrated, timeframeBar.ids]);
+
+  const addCustomTimeframe = useCallback(() => {
+    const id = timeframeBar.add(customInput);
+    if (!id) {
+      setCustomError("Invalid format. Try 2m, 45m, 3h, 2d");
+      return;
+    }
+    selectTimeframe(id);
+    setCustomInput("");
+    setCustomError("");
+    setTimeframePickerOpen(false);
+  }, [customInput, selectTimeframe, timeframeBar]);
+
+  const pinnableTimeframes = useMemo(
+    () => [...DEFAULT_TIMEFRAME_IDS, ...QUICK_TIMEFRAME_IDS].filter((id) => !timeframeBar.ids.includes(id)),
+    [timeframeBar.ids],
+  );
 
   // ── windowed rendering: only render a slice of the (500+) pair list ───────
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
@@ -1355,13 +1491,13 @@ export function FuturesChart() {
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
 
         {/* ── Toolbar ───────────────────────────────────────────────────────── */}
-        <div className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2 border-b border-border bg-panel/60 px-4 py-2">
+        <div className="relative z-40 flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2 overflow-visible border-b border-border bg-panel/60 px-4 py-2">
 
           {/* Active symbol + live price + candle countdown */}
           <div className="flex items-center gap-2">
             <span className="text-lg font-bold tracking-tight">{symbol}</span>
             <span className="rounded bg-secondary/60 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
-              {INTERVALS.find((interval) => interval.value === timeframe)?.label ?? timeframe}
+              {getTimeframe(timeframe).label}
             </span>
             <span className="flex items-center gap-1 rounded border border-border bg-secondary/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
               <Timer className="h-2.5 w-2.5 shrink-0" />
@@ -1405,22 +1541,22 @@ export function FuturesChart() {
 
             {/* Timeframe buttons */}
             <div className="scroll-thin flex max-w-[60vw] items-center gap-0.5 overflow-x-auto rounded-md border border-border bg-secondary/40 p-0.5 lg:max-w-none">
-              {INTERVALS.map(({ label, value }) => (
+              {timeframeBar.items.map((item) => (
                 <button
-                  key={value}
-                  onClick={() => selectTimeframe(value)}
+                  key={item.id}
+                  onClick={() => selectTimeframe(item.id)}
                   className={`shrink-0 rounded px-2 py-1 text-xs font-semibold transition-colors ${
-                    timeframe === value
+                    timeframe === item.id
                       ? "bg-primary text-primary-foreground"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  {label}
+                  {item.label}
                 </button>
               ))}
             </div>
 
-            <div className="relative">
+            <div className="relative z-50">
               <button
                 type="button"
                 onClick={() => setTimeframePickerOpen((open) => !open)}
@@ -1436,25 +1572,54 @@ export function FuturesChart() {
                 <Plus className="h-3.5 w-3.5" />
               </button>
               {timeframePickerOpen && (
-                <div className="absolute right-0 top-full z-50 mt-1 grid w-48 grid-cols-4 gap-1 rounded-md border border-[#1E3A6E] bg-[#091629] p-2 shadow-2xl">
-                  {EXTRA_INTERVALS.map(({ label, value }) => (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => {
-                        selectTimeframe(value);
-                        setTimeframePickerOpen(false);
-                      }}
-                      className={cn(
-                        "rounded px-2 py-1.5 text-xs font-semibold transition-colors",
-                        timeframe === value
-                          ? "bg-[#2563EB] text-white"
-                          : "bg-[#0D1F3C] text-[#7BA8CC] hover:bg-[#1A3560] hover:text-white",
-                      )}
-                    >
-                      {label}
-                    </button>
-                  ))}
+                <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-md border border-border bg-panel shadow-2xl">
+                  <div className="border-b border-border px-3 py-2 text-[10px] font-semibold uppercase text-muted-foreground">
+                    Pin a timeframe
+                  </div>
+                  <div className="grid grid-cols-5 gap-1 p-3">
+                    {pinnableTimeframes.length === 0 && (
+                      <span className="col-span-5 text-[11px] text-muted-foreground">All presets pinned.</span>
+                    )}
+                    {pinnableTimeframes.map((id) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => {
+                          timeframeBar.pin(id);
+                          selectTimeframe(id);
+                          setTimeframePickerOpen(false);
+                        }}
+                        className="rounded bg-secondary/50 px-1.5 py-1 text-xs font-medium text-muted-foreground hover:bg-primary/20 hover:text-primary"
+                      >
+                        {getTimeframe(id).label}
+                      </button>
+                    ))}
+                  </div>
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      addCustomTimeframe();
+                    }}
+                    className="border-t border-border p-3"
+                  >
+                    <div className="flex gap-2">
+                      <input
+                        value={customInput}
+                        onChange={(event) => {
+                          setCustomInput(event.target.value);
+                          setCustomError("");
+                        }}
+                        placeholder="Custom e.g. 45m, 3h, 2d"
+                        aria-label="Custom timeframe"
+                        className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs outline-none focus:border-primary"
+                      />
+                      <button type="submit" className="rounded bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground">
+                        Add
+                      </button>
+                    </div>
+                    {customError && <p className="mt-1 text-[10px] text-bear">{customError}</p>}
+                    <p className="mt-1 text-[10px] text-muted-foreground/60">Units: m h d w mo</p>
+                  </form>
                 </div>
               )}
             </div>
@@ -1463,7 +1628,7 @@ export function FuturesChart() {
 
 
         {/* ── Chart + overlay ───────────────────────────────────────────────── */}
-        <div className="relative min-h-0 flex-1 bg-card">
+        <div className="relative z-0 min-h-0 flex-1 bg-card">
           {/* lightweight-charts mounts here */}
           <div ref={containerRef} className="absolute inset-0" />
 
