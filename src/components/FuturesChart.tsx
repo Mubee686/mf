@@ -246,7 +246,7 @@ export function FuturesChart() {
       const startedAt = Date.now();
       let response: Response;
       try {
-        response = await fetch(`/api/public/futures/klines?${params}`, { signal });
+        response = await fetch(`https://cgirdlkuarpzrpaybrkb.supabase.co/functions/v1/hyper-task?type=klines&${params}`, { signal });
       } finally {
         if (!signal?.aborted) reportRequestLatency(Date.now() - startedAt);
       }
