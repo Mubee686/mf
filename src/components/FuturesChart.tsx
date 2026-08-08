@@ -198,6 +198,7 @@ export function FuturesChart() {
   const olderAbortRef = useRef<AbortController | null>(null);
   const historyStartRef = useRef<number | null>(null);
   const reachedHistoryLimitRef = useRef(false);
+  const loadOlderRef = useRef<() => void>(() => {});
 
   // ── state ─────────────────────────────────────────────────────────────────
   const [allSymbols,   setAllSymbols]   = useState<string[]>(DEFAULT_SYMBOLS);
@@ -233,7 +234,6 @@ export function FuturesChart() {
   const [isSyncingLive, setIsSyncingLive] = useState(false);
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timeframeBar = useTimeframeBar();
-  const intervalPlan = useMemo(() => futuresIntervalPlan(timeframe), [timeframe]);
   const fetchKlines = useCallback(
     async (requestedSymbol: string, requestedInterval: string, limit = 500, signal?: AbortSignal, endTime?: number) => {
       const plan = futuresIntervalPlan(requestedInterval);
@@ -246,7 +246,7 @@ export function FuturesChart() {
       const startedAt = Date.now();
       let response: Response;
       try {
-        response = await fetch(`https://cgirdlkuarpzrpaybrkb.supabase.co/functions/v1/hyper-task?type=klines&${params}`, { signal });
+        response = await fetch(`/api/public/futures/klines?${params}`, { signal });
       } finally {
         if (!signal?.aborted) reportRequestLatency(Date.now() - startedAt);
       }
@@ -270,6 +270,24 @@ export function FuturesChart() {
     },
     [],
   );
+
+  const mergeCandles = useCallback((older: Candle[], newer: Candle[]) => {
+    const merged = new Map<number, Candle>();
+    for (const candle of older) merged.set(candle.time, { ...candle });
+    for (const candle of newer) {
+      const previous = merged.get(candle.time);
+      merged.set(candle.time, previous
+        ? {
+            time: candle.time,
+            open: previous.open,
+            high: Math.max(previous.high, candle.high),
+            low: Math.min(previous.low, candle.low),
+            close: candle.close,
+          }
+        : { ...candle });
+    }
+    return [...merged.values()].sort((a, b) => a.time - b.time);
+  }, []);
 
   const fetchTicker = useCallback(async () => {
     const response = await fetch("https://cgirdlkuarpzrpaybrkb.supabase.co/functions/v1/hyper-task?type=ticker");
@@ -763,6 +781,8 @@ export function FuturesChart() {
     const onRange = () => {
       drawOverlay.current();
       updateScrolledState();
+      const range = chart.timeScale().getVisibleLogicalRange();
+      if (range && range.from < 75) loadOlderRef.current();
     };
     chart.timeScale().subscribeVisibleLogicalRangeChange(onRange);
 
@@ -772,8 +792,7 @@ export function FuturesChart() {
     let rafId: number;
     let lastRafY: number | null | undefined = undefined;
     let lastRafAt = 0;
-    // Redraw at most ~5x/second: enough to look live, cheap on low-end phones.
-    const RAF_MIN_INTERVAL = 200;
+    const RAF_MIN_INTERVAL = 16;
     const rafLoop = () => {
       if (document.hidden) {
         rafId = requestAnimationFrame(rafLoop);
@@ -789,7 +808,7 @@ export function FuturesChart() {
       const close = liveCloseRef.current ?? candlesRef.current[candlesRef.current.length - 1]?.close;
       if (s && close != null) {
         const y = s.priceToCoordinate(close);
-        if (y !== lastRafY) {
+        if (y != null && (lastRafY == null || Math.abs(y - lastRafY) >= 0.1)) {
           lastRafY = y;
           setPriceY(y ?? null);
           setScaleWidth(chart.priceScale("right").width());
@@ -877,6 +896,7 @@ export function FuturesChart() {
             ? lastFailure
             : new Error(`No candle data returned for ${requestedSymbol}`);
         }
+        historyStartRef.current = klines[0]?.time ?? null;
         setBaseCandles(klines);
         const latest = klines[klines.length - 1];
         liveCloseRef.current = latest.close;
@@ -906,10 +926,65 @@ export function FuturesChart() {
   const loadHistoryRef = useRef(loadHistory);
   loadHistoryRef.current = loadHistory;
 
+  const loadOlder = useCallback(async () => {
+    if (olderLoadingRef.current || reachedHistoryLimitRef.current || foregroundLoadingRef.current) return;
+    const oldest = historyStartRef.current ?? baseCandles[0]?.time;
+    if (!oldest) return;
+    const cutoff = timeframeSixMonthCutoff();
+    if (oldest <= cutoff) {
+      reachedHistoryLimitRef.current = true;
+      return;
+    }
+    olderLoadingRef.current = true;
+    const requestedKey = `${symbol}|${timeframe}`;
+    const controller = new AbortController();
+    olderAbortRef.current = controller;
+    try {
+      const older = await fetchKlines(
+        symbol,
+        timeframe,
+        nativeBatchLimit(futuresIntervalPlan(timeframe)),
+        controller.signal,
+        oldest * 1000 - 1,
+      );
+      if (controller.signal.aborted || selectionKeyRef.current !== requestedKey || older.length === 0) return;
+      const bounded = older.filter((candle) => candle.time >= cutoff);
+      if (bounded.length === 0) {
+        reachedHistoryLimitRef.current = true;
+        return;
+      }
+      const currentRange = chartRef.current?.timeScale().getVisibleLogicalRange();
+      setBaseCandles((current) => {
+        const next = mergeCandles(bounded, current);
+        const added = next.length - current.length;
+        historyStartRef.current = next[0]?.time ?? oldest;
+        if ((next[0]?.time ?? Infinity) <= cutoff || added === 0) reachedHistoryLimitRef.current = true;
+        requestAnimationFrame(() => {
+          if (currentRange && added > 0 && selectionKeyRef.current === requestedKey) {
+            chartRef.current?.timeScale().setVisibleLogicalRange({
+              from: currentRange.from + added,
+              to: currentRange.to + added,
+            });
+          }
+        });
+        return next;
+      });
+    } catch {
+      // Retry when the user approaches the edge again.
+    } finally {
+      if (olderAbortRef.current === controller) olderAbortRef.current = null;
+      olderLoadingRef.current = false;
+    }
+  }, [baseCandles, fetchKlines, mergeCandles, symbol, timeframe]);
+  loadOlderRef.current = () => void loadOlder();
+
 
 
   useEffect(() => {
     selectionKeyRef.current = `${symbol}|${timeframe}`;
+    historyStartRef.current = null;
+    reachedHistoryLimitRef.current = false;
+    olderAbortRef.current?.abort();
     void loadHistory(false);
     return () => {
       historyAbortRef.current?.abort();
@@ -945,8 +1020,14 @@ export function FuturesChart() {
     if (fitKeyRef.current !== key) {
       fitKeyRef.current = key;
       const scale = chartRef.current?.timeScale();
-      scale?.fitContent();
-      scale?.scrollToRealTime();
+      const lastIndex = baseCandles.length - 1;
+      if (scale && lastIndex >= 0) {
+        scale.setVisibleLogicalRange({
+          from: Math.max(0, lastIndex - LIVE_WINDOW_BARS + 1),
+          to: lastIndex + 6,
+        });
+      }
+      chartRef.current?.priceScale("right").applyOptions({ autoScale: true });
       isScrolledBackRef.current = false;
       setIsScrolledBack(false);
     }
@@ -970,6 +1051,7 @@ export function FuturesChart() {
     let attempt = 0;
     let endpointIndex = 0;
     const socketKey = `${symbol}|${timeframe}`;
+    const streamPlan = futuresIntervalPlan(timeframe);
     const streamOrigins = ["wss://fstream.binance.com", "wss://fstream.binancefuture.com"];
 
     // ── Throttled paint: the socket can emit many frames per second, but the
@@ -995,8 +1077,25 @@ export function FuturesChart() {
       setLiveCandle(c);
     };
 
-    const applyCandle = (c: Candle) => {
+    const applyCandle = (raw: Candle) => {
       if (disposed || selectionKeyRef.current !== socketKey) return;
+      let c = raw;
+      if (streamPlan.aggregateSeconds) {
+        const bucket = Math.floor(raw.time / streamPlan.aggregateSeconds) * streamPlan.aggregateSeconds;
+        const lastBase = candlesRef.current[candlesRef.current.length - 1];
+        const current = liveCandleRef.current?.time === bucket
+          ? liveCandleRef.current
+          : lastBase?.time === bucket ? lastBase : null;
+        c = current
+          ? {
+              time: bucket,
+              open: current.open,
+              high: Math.max(current.high, raw.high),
+              low: Math.min(current.low, raw.low),
+              close: raw.close,
+            }
+          : { ...raw, time: bucket };
+      }
       if (![c.time, c.open, c.high, c.low, c.close].every(Number.isFinite)) return;
       if (c.high < c.low || c.open > c.high || c.open < c.low || c.close > c.high || c.close < c.low) return;
       lastDataAt = Date.now();
@@ -1019,7 +1118,11 @@ export function FuturesChart() {
       if (disposed || fallbackInFlight || selectionKeyRef.current !== socketKey) return;
       fallbackInFlight = true;
       try {
-        const latest = await fetchKlines(symbol, timeframe, 2);
+        const latest = await fetchKlines(
+          symbol,
+          timeframe,
+          streamPlan.aggregateSeconds ? nativeBatchLimit(streamPlan) : 2,
+        );
         if (disposed || selectionKeyRef.current !== socketKey) return;
         const candle = latest[latest.length - 1];
         if (candle) applyCandle(candle);
@@ -1040,7 +1143,7 @@ export function FuturesChart() {
 
     const connect = () => {
       if (disposed) return;
-      const stream = `${symbol.toLowerCase()}@kline_${timeframe}`;
+      const stream = `${symbol.toLowerCase()}@kline_${streamPlan.binanceInterval}`;
       try {
         ws = new WebSocket(`${streamOrigins[endpointIndex]}/ws/${stream}`);
       } catch {
