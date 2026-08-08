@@ -1494,7 +1494,7 @@ export function FuturesChart() {
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
 
         {/* ── Toolbar ───────────────────────────────────────────────────────── */}
-        <div className="relative z-30 flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2 border-b border-border bg-panel/60 px-4 py-2">
+        <div className="relative z-40 flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2 overflow-visible border-b border-border bg-panel/60 px-4 py-2">
 
           {/* Active symbol + live price + candle countdown */}
           <div className="flex items-center gap-2">
@@ -1559,7 +1559,7 @@ export function FuturesChart() {
               ))}
             </div>
 
-            <div className="relative">
+            <div className="relative z-50">
               <button
                 type="button"
                 onClick={() => setTimeframePickerOpen((open) => !open)}
@@ -1631,7 +1631,7 @@ export function FuturesChart() {
 
 
         {/* ── Chart + overlay ───────────────────────────────────────────────── */}
-        <div className="relative min-h-0 flex-1 bg-card">
+        <div className="relative z-0 min-h-0 flex-1 bg-card">
           {/* lightweight-charts mounts here */}
           <div ref={containerRef} className="absolute inset-0" />
 
