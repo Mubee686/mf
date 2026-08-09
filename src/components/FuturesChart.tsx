@@ -59,6 +59,8 @@ import {
   detectAllBOS,
   detectVisibleIDM,
 } from "@/lib/smc";
+import { getToolColor, subscribeToolColors, useToolColors } from "@/lib/tool-colors";
+import { ToolColorPicker } from "@/components/ToolColorPicker";
 
 const FREE_TOOLS = new Set<ToolId>(TOOLS.filter((t) => t.tier === "free").map((t) => t.id));
 const PREMIUM_TOOLS = new Set<ToolId>(TOOLS.filter((t) => t.tier === "premium").map((t) => t.id));
@@ -89,8 +91,7 @@ const C = {
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-const toolColor = (id: Zone["tool"]): string =>
-  TOOLS.find((t) => t.id === id)?.color ?? "#38bdf8";
+const toolColor = (id: Zone["tool"]): string => getToolColor(id);
 
 function hexToRgba(hex: string, alpha: number): string {
   const h = hex.replace("#", "");
@@ -221,6 +222,8 @@ export function FuturesChart() {
   );
   const [legend, setLegend] = useState<Candle | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [colorPickerTool, setColorPickerTool] = useState<ToolId | null>(null);
+  const toolColors = useToolColors();
   const [timeframePickerOpen, setTimeframePickerOpen] = useState(false);
   const [customInput, setCustomInput] = useState("");
   const [customError, setCustomError] = useState("");
@@ -542,7 +545,7 @@ export function FuturesChart() {
     const idmEnabled = enabledRef.current.has("idm");
     const ac = analysisCandlesRef.current;
     const acLast = ac[ac.length - 1];
-    const idmKey = [ac.length, acLast?.time ?? 0, visFrom, visTo].join(":");
+    const idmKey = [symbol, timeframe, ac.length, acLast?.time ?? 0, visFrom, visTo].join(":");
     if (idmEnabled && ac.length >= 15) {
       if (!idmCacheRef.current || idmCacheRef.current.key !== idmKey) {
         idmCacheRef.current = { key: idmKey, result: detectVisibleIDM(ac, visFrom, visTo) };
@@ -1039,6 +1042,15 @@ export function FuturesChart() {
 
   // ── redraw overlay when zones or enabled tools change ────────────────────
   useEffect(() => { drawOverlay.current(); }, [zones, enabledTools]);
+
+  // Custom tool colours repaint the overlay immediately.
+  useEffect(() => subscribeToolColors(() => drawOverlay.current()), []);
+
+  // A symbol/timeframe switch must never reuse the previous market's IDM.
+  useEffect(() => {
+    idmCacheRef.current = null;
+    drawOverlay.current();
+  }, [symbol, timeframe]);
 
   // ── Live feed: direct Binance Futures WebSocket ───────────────────────────
   // wss://fstream.binance.com/ws/<symbol>@kline_<interval>. Reconnects on
@@ -1782,10 +1794,11 @@ export function FuturesChart() {
                       {tierTools.map((t) => {
                         const on = enabledTools.has(t.id);
                         const locked = t.tier === "premium" && !membershipActive;
+                        const color = toolColors[t.id];
                         return (
+                          <div key={t.id}>
                           <button
-                            key={t.id}
-                            onClick={() => toggleTool(t.id)}
+                            onClick={() => setColorPickerTool((c) => (c === t.id ? null : t.id))}
                             className={cn(
                               "flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors",
                               locked
@@ -1798,8 +1811,8 @@ export function FuturesChart() {
                             <span
                               className="mt-1 h-3 w-3 shrink-0 rounded-sm"
                               style={{
-                                backgroundColor: locked ? "transparent" : on ? t.color : "transparent",
-                                border: `1px solid ${locked ? "currentColor" : t.color}`,
+                                backgroundColor: locked ? "transparent" : on ? color : "transparent",
+                                border: `1px solid ${locked ? "currentColor" : color}`,
                               }}
                             />
                             <div className="min-w-0 flex-1">
@@ -1819,8 +1832,15 @@ export function FuturesChart() {
                             </div>
                             {!locked && (
                               <span
+                                role="switch"
+                                aria-checked={on}
+                                aria-label={`Toggle ${t.name}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleTool(t.id);
+                                }}
                                 className={cn(
-                                  "mt-0.5 flex h-4 w-7 shrink-0 items-center rounded-full p-0.5 transition-colors",
+                                  "mt-0.5 flex h-4 w-7 shrink-0 cursor-pointer items-center rounded-full p-0.5 transition-colors",
                                   on ? "bg-[#2563EB]" : "bg-[#0D1F3C]",
                                 )}
                               >
@@ -1833,6 +1853,15 @@ export function FuturesChart() {
                               </span>
                             )}
                           </button>
+                          {colorPickerTool === t.id && !locked && (
+                            <ToolColorPicker
+                              toolId={t.id}
+                              toolName={t.name}
+                              color={color}
+                              onClose={() => setColorPickerTool(null)}
+                            />
+                          )}
+                          </div>
                         );
                       })}
                     </div>

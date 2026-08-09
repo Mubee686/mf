@@ -36,7 +36,7 @@ export const TOOLS: ToolMeta[] = [
     id: "idm",
     name: "Inducement",
     short: "IDM",
-    color: "#fb923c",
+    color: "#111827",
     tier: "free",
     description: "Minor liquidity swing used to lure traders before the real move.",
   },

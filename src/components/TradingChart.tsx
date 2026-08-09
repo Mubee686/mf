@@ -24,6 +24,7 @@ import {
 
 import type { Candle } from "@/lib/forex";
 import { formatPrice } from "@/lib/forex";
+import { getToolColor, subscribeToolColors } from "@/lib/tool-colors";
 import { TOOLS, detectAllBOS, detectVisibleIDM, type Zone, type ToolId } from "@/lib/smc";
 
 export type ChartType = "candlestick" | "line";
@@ -55,7 +56,7 @@ const C = {
   crosshair: "rgba(148,163,184,0.5)",
 };
 
-const toolColor = (id: Zone["tool"]) => TOOLS.find((t) => t.id === id)?.color ?? "#38bdf8";
+const toolColor = (id: Zone["tool"]) => getToolColor(id);
 
 function hexToRgba(hex: string, alpha: number): string {
   const h = hex.replace("#", "");
@@ -289,6 +290,7 @@ function TradingChartComponent({
     const idmEnabled = enabledToolsRef.current.has("idm");
     const lastCandle = cs[cs.length - 1];
     const idmCacheKey = [
+      resetKey,
       cs.length,
       lastCandle?.time ?? 0,
       lastCandle?.high ?? 0,
@@ -724,6 +726,15 @@ function TradingChartComponent({
     setIsScrolledBack(false);
     drawOverlay.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetKey]);
+
+  // Custom tool colours repaint the overlay immediately.
+  useEffect(() => subscribeToolColors(() => drawOverlay.current()), []);
+
+  // A symbol/timeframe switch must never reuse the previous market's IDM.
+  useEffect(() => {
+    idmCacheRef.current = null;
+    drawOverlay.current();
   }, [resetKey]);
 
   // ── redraw overlay when zones change ───────────────────────────────────
