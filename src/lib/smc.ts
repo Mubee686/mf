@@ -488,24 +488,26 @@ export function detectVisibleIDM(
   let sweepIndex: number | undefined;
   let kind: ZoneKind | undefined;
 
-       if (majorLow.index < majorHigh.index) {
-    // Once the real structural high has closed beyond its level, the leg is
-    // complete and its IDM is no longer the active inducement.
+       let pendingCandidate: Swing | undefined;
+
+  // majorHigh is more recent than majorLow => price made a High, then
+  // pulled back => the pullback LOW is the bullish IDM. Price is expected
+  // to break back above majorHigh (BOS) after the IDM is swept.
+  if (majorHigh.index > majorLow.index) {
     if (window.slice(majorHigh.index + 1).some((c) => c.close > majorHigh.price)) {
       return [];
     }
-    // Bullish structure: buy-side liquidity above the latest internal high.
     const candidates = minor
       .filter(
         (s) =>
-          s.type === "high" &&
-          s.index > majorLow.index &&
-          s.index < majorHigh.index &&
-          s.price < majorHigh.price,
+          s.type === "low" &&
+          s.index > majorHigh.index &&
+          s.price > majorLow.price,
       )
-      .sort((a, b) => b.index - a.index);
+      .sort((a, b) => a.index - b.index);
+    pendingCandidate = candidates[0];
     for (const point of candidates) {
-      const sweptAt = findSweep(point, majorHigh.index - 1);
+      const sweptAt = findSweep(point, window.length - 1);
       if (sweptAt != null) {
         candidate = point;
         sweepIndex = sweptAt;
@@ -513,24 +515,25 @@ export function detectVisibleIDM(
         break;
       }
     }
+    if (!candidate && pendingCandidate) kind = "bullish";
   } else {
-    // Same invalidation for a bearish leg: a close below the structural low
-    // is the actual break, not a sweep of the preceding inducement.
+    // majorLow is more recent than majorHigh => price made a Low, then
+    // pulled back => the pullback HIGH is the bearish IDM. Price is
+    // expected to break back below majorLow (BOS) after the IDM is swept.
     if (window.slice(majorLow.index + 1).some((c) => c.close < majorLow.price)) {
       return [];
     }
-    // Bearish structure: sell-side liquidity below the latest internal low.
     const candidates = minor
       .filter(
         (s) =>
-          s.type === "low" &&
-          s.index > majorHigh.index &&
-          s.index < majorLow.index &&
-          s.price > majorLow.price,
+          s.type === "high" &&
+          s.index > majorLow.index &&
+          s.price < majorHigh.price,
       )
-      .sort((a, b) => b.index - a.index);
+      .sort((a, b) => a.index - b.index);
+    pendingCandidate = candidates[0];
     for (const point of candidates) {
-      const sweptAt = findSweep(point, majorLow.index - 1);
+      const sweptAt = findSweep(point, window.length - 1);
       if (sweptAt != null) {
         candidate = point;
         sweepIndex = sweptAt;
@@ -538,30 +541,54 @@ export function detectVisibleIDM(
         break;
       }
     }
+    if (!candidate && pendingCandidate) kind = "bearish";
   }
 
-  if (!candidate || sweepIndex == null || !kind) return [];
-  const startIndex = from + candidate.index;
-  const globalSweepIndex = from + sweepIndex;
-  return [
-    {
-      id: `idm-${kind === "bullish" ? "up" : "down"}-${startIndex}`,
-      tool: "idm",
-      kind,
-      startIndex,
-      endIndex: globalSweepIndex,
-      price: candidate.price,
-      swept: true,
-      sweepIndex: globalSweepIndex,
-      label: "IDM ✓",
-      detail:
-        kind === "bullish"
-          ? "Bullish IDM swept — internal high taken before the structural high"
-          : "Bearish IDM swept — internal low taken before the structural low",
-    },
-  ];
-}
+  if (candidate && sweepIndex != null && kind) {
+    const startIndex = from + candidate.index;
+    const globalSweepIndex = from + sweepIndex;
+    return [
+      {
+        id: `idm-${kind === "bullish" ? "up" : "down"}-${startIndex}`,
+        tool: "idm",
+        kind,
+        startIndex,
+        endIndex: globalSweepIndex,
+        price: candidate.price,
+        swept: true,
+        sweepIndex: globalSweepIndex,
+        label: "IDM ✓",
+        detail:
+          kind === "bullish"
+            ? "Bullish IDM swept — pullback low taken before the break above the prior high"
+            : "Bearish IDM swept — pullback high taken before the break below the prior low",
+      },
+    ];
+  }
 
+  if (pendingCandidate && kind) {
+    const startIndex = from + pendingCandidate.index;
+    return [
+      {
+        id: `idm-${kind === "bullish" ? "up" : "down"}-${startIndex}-pending`,
+        tool: "idm",
+        kind,
+        startIndex,
+        endIndex: to,
+        price: pendingCandidate.price,
+        swept: false,
+        sweepIndex: undefined,
+        label: "IDM",
+        detail:
+          kind === "bullish"
+            ? "Bullish IDM — pullback low not yet swept"
+            : "Bearish IDM — pullback high not yet swept",
+      },
+    ];
+  }
+
+  return [];
+}
 function detectPOI(orderBlocks: Zone[], fvgs: Zone[]): Zone[] {
   const zones: Zone[] = [];
   for (const ob of orderBlocks) {
