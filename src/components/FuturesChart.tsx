@@ -554,9 +554,6 @@ export function FuturesChart() {
       idmCacheRef.current = null;
     }
     const visibleIDM = idmEnabled ? (idmCacheRef.current?.result ?? []) : [];
-    (window as unknown as Record<string, unknown>).__idmDebug = {
-      idmEnabled, ac: ac.length, visFrom, visTo, found: visibleIDM.length,
-    };
 
 
     // ── Non-BOS/CHoCH zones + IDM ────────────────────────────────────────────
