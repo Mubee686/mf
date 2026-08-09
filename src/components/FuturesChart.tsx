@@ -59,7 +59,7 @@ import {
   detectAllBOS,
   detectVisibleIDM,
 } from "@/lib/smc";
-import { getToolColor, useToolColors } from "@/lib/tool-colors";
+import { getToolColor, subscribeToolColors, useToolColors } from "@/lib/tool-colors";
 import { ToolColorPicker } from "@/components/ToolColorPicker";
 
 const FREE_TOOLS = new Set<ToolId>(TOOLS.filter((t) => t.tier === "free").map((t) => t.id));
@@ -1040,6 +1040,15 @@ export function FuturesChart() {
 
   // ── redraw overlay when zones or enabled tools change ────────────────────
   useEffect(() => { drawOverlay.current(); }, [zones, enabledTools]);
+
+  // Custom tool colours repaint the overlay immediately.
+  useEffect(() => subscribeToolColors(() => drawOverlay.current()), []);
+
+  // A symbol/timeframe switch must never reuse the previous market's IDM.
+  useEffect(() => {
+    idmCacheRef.current = null;
+    drawOverlay.current();
+  }, [symbol, timeframe]);
 
   // ── Live feed: direct Binance Futures WebSocket ───────────────────────────
   // wss://fstream.binance.com/ws/<symbol>@kline_<interval>. Reconnects on
