@@ -24,6 +24,7 @@ import {
 
 import type { Candle } from "@/lib/forex";
 import { formatPrice } from "@/lib/forex";
+import { getToolColor, useToolColors } from "@/lib/tool-colors";
 import { TOOLS, detectAllBOS, detectVisibleIDM, type Zone, type ToolId } from "@/lib/smc";
 
 export type ChartType = "candlestick" | "line";
@@ -55,7 +56,7 @@ const C = {
   crosshair: "rgba(148,163,184,0.5)",
 };
 
-const toolColor = (id: Zone["tool"]) => TOOLS.find((t) => t.id === id)?.color ?? "#38bdf8";
+const toolColor = (id: Zone["tool"]) => getToolColor(id);
 
 function hexToRgba(hex: string, alpha: number): string {
   const h = hex.replace("#", "");

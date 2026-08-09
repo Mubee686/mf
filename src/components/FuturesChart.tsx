@@ -59,6 +59,8 @@ import {
   detectAllBOS,
   detectVisibleIDM,
 } from "@/lib/smc";
+import { getToolColor, useToolColors } from "@/lib/tool-colors";
+import { ToolColorPicker } from "@/components/ToolColorPicker";
 
 const FREE_TOOLS = new Set<ToolId>(TOOLS.filter((t) => t.tier === "free").map((t) => t.id));
 const PREMIUM_TOOLS = new Set<ToolId>(TOOLS.filter((t) => t.tier === "premium").map((t) => t.id));
@@ -89,8 +91,7 @@ const C = {
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-const toolColor = (id: Zone["tool"]): string =>
-  TOOLS.find((t) => t.id === id)?.color ?? "#38bdf8";
+const toolColor = (id: Zone["tool"]): string => getToolColor(id);
 
 function hexToRgba(hex: string, alpha: number): string {
   const h = hex.replace("#", "");
@@ -542,7 +543,7 @@ export function FuturesChart() {
     const idmEnabled = enabledRef.current.has("idm");
     const ac = analysisCandlesRef.current;
     const acLast = ac[ac.length - 1];
-    const idmKey = [ac.length, acLast?.time ?? 0, visFrom, visTo].join(":");
+    const idmKey = [symbol, timeframe, ac.length, acLast?.time ?? 0, visFrom, visTo].join(":");
     if (idmEnabled && ac.length >= 15) {
       if (!idmCacheRef.current || idmCacheRef.current.key !== idmKey) {
         idmCacheRef.current = { key: idmKey, result: detectVisibleIDM(ac, visFrom, visTo) };
