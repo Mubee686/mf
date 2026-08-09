@@ -36,6 +36,8 @@ import {
   parseTimeframe,
 } from "@/lib/timeframes";
 import { TOOLS, analyze, zonesForTools, type ToolId } from "@/lib/smc";
+import { useToolColors } from "@/lib/tool-colors";
+import { ToolColorPicker } from "@/components/ToolColorPicker";
 import { cn } from "@/lib/utils";
 import { useAuthSession } from "@/hooks/use-auth";
 import { User as UserIcon } from "lucide-react";
@@ -69,6 +71,8 @@ function Terminal() {
   const [timeframeId, setTimeframeId] = useState("15m");
   // Start with free tools only; premium tools are added once membership is confirmed active
   const [enabled, setEnabled] = useState<Set<ToolId>>(() => new Set(FREE_TOOLS));
+  const [colorPickerTool, setColorPickerTool] = useState<ToolId | null>(null);
+  const toolColors = useToolColors();
   const [query, setQuery] = useState("");
   const [promotedPairs, setPromotedPairs] = useState<string[]>([]);
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -594,10 +598,11 @@ function Terminal() {
                         {tierTools.map((t) => {
                           const on = enabled.has(t.id);
                           const locked = t.tier === "premium" && !membershipActive;
+                          const color = toolColors[t.id];
                           return (
+                            <div key={t.id}>
                             <button
-                              key={t.id}
-                              onClick={() => toggle(t.id)}
+                              onClick={() => setColorPickerTool((c) => (c === t.id ? null : t.id))}
                               className={cn(
                                 "flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors",
                                 locked
@@ -608,8 +613,8 @@ function Terminal() {
                               <span
                                 className="mt-1 h-3 w-3 shrink-0 rounded-sm"
                                 style={{
-                                  backgroundColor: locked ? "transparent" : on ? t.color : "transparent",
-                                  border: `1px solid ${locked ? "currentColor" : t.color}`,
+                                  backgroundColor: locked ? "transparent" : on ? color : "transparent",
+                                  border: `1px solid ${locked ? "currentColor" : color}`,
                                 }}
                               />
                               <div className="min-w-0 flex-1">
@@ -629,8 +634,15 @@ function Terminal() {
                               </div>
                               {!locked && (
                                 <span
+                                  role="switch"
+                                  aria-checked={on}
+                                  aria-label={`Toggle ${t.name}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggle(t.id);
+                                  }}
                                   className={cn(
-                                    "mt-0.5 flex h-4 w-7 shrink-0 items-center rounded-full p-0.5 transition-colors",
+                                    "mt-0.5 flex h-4 w-7 shrink-0 cursor-pointer items-center rounded-full p-0.5 transition-colors",
                                     on ? "bg-primary" : "bg-secondary",
                                   )}
                                 >
@@ -643,6 +655,15 @@ function Terminal() {
                                 </span>
                               )}
                             </button>
+                            {colorPickerTool === t.id && !locked && (
+                              <ToolColorPicker
+                                toolId={t.id}
+                                toolName={t.name}
+                                color={color}
+                                onClose={() => setColorPickerTool(null)}
+                              />
+                            )}
+                            </div>
                           );
                         })}
                       </div>
@@ -672,7 +693,7 @@ function Terminal() {
                             >
                               <span
                                 className="h-2 w-2 shrink-0 rounded-full"
-                                style={{ backgroundColor: meta.color }}
+                                style={{ backgroundColor: toolColors[meta.id] }}
                               />
                               <span className="text-xs font-medium">{z.label}</span>
                               <span className="tabular ml-auto text-[11px] text-muted-foreground">
