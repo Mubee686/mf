@@ -225,7 +225,7 @@ function detectStructure(candles: Candle[], swings: Swing[]): StructureResult {
     }
   }
 
-  return { bos: bos.slice(-5), choch: choch.slice(-4), obSeeds };
+  return { bos, choch, obSeeds };
 }
 
 function detectOrderBlocks(
