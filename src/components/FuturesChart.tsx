@@ -222,6 +222,8 @@ export function FuturesChart() {
   );
   const [legend, setLegend] = useState<Candle | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [colorPickerTool, setColorPickerTool] = useState<ToolId | null>(null);
+  const toolColors = useToolColors();
   const [timeframePickerOpen, setTimeframePickerOpen] = useState(false);
   const [customInput, setCustomInput] = useState("");
   const [customError, setCustomError] = useState("");
@@ -1792,10 +1794,11 @@ export function FuturesChart() {
                       {tierTools.map((t) => {
                         const on = enabledTools.has(t.id);
                         const locked = t.tier === "premium" && !membershipActive;
+                        const color = toolColors[t.id];
                         return (
+                          <div key={t.id}>
                           <button
-                            key={t.id}
-                            onClick={() => toggleTool(t.id)}
+                            onClick={() => setColorPickerTool((c) => (c === t.id ? null : t.id))}
                             className={cn(
                               "flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors",
                               locked
@@ -1808,8 +1811,8 @@ export function FuturesChart() {
                             <span
                               className="mt-1 h-3 w-3 shrink-0 rounded-sm"
                               style={{
-                                backgroundColor: locked ? "transparent" : on ? t.color : "transparent",
-                                border: `1px solid ${locked ? "currentColor" : t.color}`,
+                                backgroundColor: locked ? "transparent" : on ? color : "transparent",
+                                border: `1px solid ${locked ? "currentColor" : color}`,
                               }}
                             />
                             <div className="min-w-0 flex-1">
@@ -1829,8 +1832,15 @@ export function FuturesChart() {
                             </div>
                             {!locked && (
                               <span
+                                role="switch"
+                                aria-checked={on}
+                                aria-label={`Toggle ${t.name}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleTool(t.id);
+                                }}
                                 className={cn(
-                                  "mt-0.5 flex h-4 w-7 shrink-0 items-center rounded-full p-0.5 transition-colors",
+                                  "mt-0.5 flex h-4 w-7 shrink-0 cursor-pointer items-center rounded-full p-0.5 transition-colors",
                                   on ? "bg-[#2563EB]" : "bg-[#0D1F3C]",
                                 )}
                               >
@@ -1843,6 +1853,15 @@ export function FuturesChart() {
                               </span>
                             )}
                           </button>
+                          {colorPickerTool === t.id && !locked && (
+                            <ToolColorPicker
+                              toolId={t.id}
+                              toolName={t.name}
+                              color={color}
+                              onClose={() => setColorPickerTool(null)}
+                            />
+                          )}
+                          </div>
                         );
                       })}
                     </div>
