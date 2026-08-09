@@ -488,7 +488,7 @@ export function detectVisibleIDM(
   let sweepIndex: number | undefined;
   let kind: ZoneKind | undefined;
 
-  if (majorLow.index < majorHigh.index) {
+       if (majorLow.index < majorHigh.index) {
     // Once the real structural high has closed beyond its level, the leg is
     // complete and its IDM is no longer the active inducement.
     if (window.slice(majorHigh.index + 1).some((c) => c.close > majorHigh.price)) {
