@@ -545,10 +545,10 @@ export function FuturesChart() {
     const idmEnabled = enabledRef.current.has("idm");
     const ac = analysisCandlesRef.current;
     const acLast = ac[ac.length - 1];
-    const idmKey = [symbol, timeframe, ac.length, acLast?.time ?? 0, visFrom, visTo].join(":");
+    const idmKey = [symbol, timeframe, ac.length, acLast?.time ?? 0].join(":");
     if (idmEnabled && ac.length >= 15) {
       if (!idmCacheRef.current || idmCacheRef.current.key !== idmKey) {
-        idmCacheRef.current = { key: idmKey, result: detectVisibleIDM(ac, visFrom, visTo) };
+        idmCacheRef.current = { key: idmKey, result: detectVisibleIDM(ac, 0, ac.length - 1) };
       }
     } else {
       idmCacheRef.current = null;
@@ -598,7 +598,7 @@ export function FuturesChart() {
 
           ctx.strokeStyle = hexToRgba(baseColor, lineAlpha);
           ctx.lineWidth   = 1.5;
-          ctx.setLineDash([8, 4]);
+          ctx.setLineDash([]);
           ctx.beginPath();
           ctx.moveTo(lineStart, y);
           ctx.lineTo(lineEnd, y);
