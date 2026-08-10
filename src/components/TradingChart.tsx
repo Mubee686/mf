@@ -733,11 +733,14 @@ function TradingChartComponent({
   // Custom tool colours repaint the overlay immediately.
   useEffect(() => subscribeToolColors(() => drawOverlay.current()), []);
 
-  // A symbol/timeframe switch must never reuse the previous market's IDM.
+  // A symbol/timeframe switch must never reuse the previous market's
+  // IDM or BOS/CHoCH structure.
   useEffect(() => {
     idmCacheRef.current = null;
+    bosCacheRef.current = null;
     drawOverlay.current();
   }, [resetKey]);
+
 
   // ── redraw overlay when zones change ───────────────────────────────────
   useEffect(() => {
