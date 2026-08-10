@@ -642,7 +642,9 @@ export function FuturesChart() {
     const chochEnabled = enabledRef.current.has("choch");
 
     if (ac.length >= 10 && (bosEnabled || chochEnabled)) {
-      const cacheKey = `${ac.length}:${acLast?.time ?? 0}`;
+      // Keyed on symbol + timeframe so a switch can never reuse the previous
+      // market's structure, and on the closed-candle set so new closes update live.
+      const cacheKey = [symbol, timeframe, ac.length, acLast?.time ?? 0].join(":");
       if (!bosCacheRef.current || bosCacheRef.current.key !== cacheKey) {
         bosCacheRef.current = { key: cacheKey, result: detectAllBOS(ac) };
       }
@@ -1049,6 +1051,7 @@ export function FuturesChart() {
   // A symbol/timeframe switch must never reuse the previous market's IDM.
   useEffect(() => {
     idmCacheRef.current = null;
+    bosCacheRef.current = null;
     drawOverlay.current();
   }, [symbol, timeframe]);
 

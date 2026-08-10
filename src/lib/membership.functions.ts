@@ -25,6 +25,8 @@ export const getMyMembership = createServerFn({ method: "POST" })
     // Auto-expire any membership whose end date has passed (incl. the 1-day trial)
     await sb.rpc("expire_stale_memberships");
 
+    // NOTE: select("*") — an explicit column list silently 400s (and yields a
+    // null row → "Inactive") if any single column is missing on the live DB.
     const [profileRes, memRes] = await Promise.all([
       sb
         .from("profiles")
@@ -33,12 +35,33 @@ export const getMyMembership = createServerFn({ method: "POST" })
         .maybeSingle(),
       sb
         .from("memberships")
-        .select("status, plan_type, duration_months, start_date, end_date, trial_used, activated_at")
+        .select("*")
         .eq("user_id", context.userId)
-        .maybeSingle(),
+        .limit(1),
     ]);
 
-    const m = memRes.data;
+    let m: AnyRow | null = (memRes.data?.[0] as AnyRow | undefined) ?? null;
+
+    // If the user's own RLS read returns nothing (missing/incorrect
+    // "Users view own membership" policy, or a PostgREST error), re-read the
+    // caller's OWN row with the service-role client. Strictly scoped to
+    // context.userId, which comes from the verified bearer token.
+    if (!m) {
+      if (memRes.error) {
+        console.error("[getMyMembership] own-row read failed:", memRes.error.message);
+      }
+      const db = await getMembershipAdminWriter(sb);
+      if (db !== sb) {
+        const { data: fallback, error: fbErr } = await db
+          .from("memberships")
+          .select("*")
+          .eq("user_id", context.userId)
+          .limit(1);
+        if (fbErr) console.error("[getMyMembership] fallback read failed:", fbErr.message);
+        m = (fallback?.[0] as AnyRow | undefined) ?? null;
+      }
+    }
+
     const isActive =
       m?.status === "active" && (!m?.end_date || new Date(m.end_date).getTime() > Date.now());
 
@@ -47,6 +70,7 @@ export const getMyMembership = createServerFn({ method: "POST" })
 
     return { profile: profileRes.data, membership: m, isActive, trialEligible };
   });
+
 
 /** Activate the one-time 1-day free trial for the current user. */
 export const activateFreeTrial = createServerFn({ method: "POST" })
