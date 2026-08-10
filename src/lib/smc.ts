@@ -625,7 +625,7 @@ function detectPOI(orderBlocks: Zone[], fvgs: Zone[]): Zone[] {
  */
 export function detectAllBOS(candles: Candle[]): { bos: Zone[]; choch: Zone[] } {
   if (candles.length < 10) return { bos: [], choch: [] };
-  const swings = findSwings(candles, 2);
+  const swings = findSwings(candles, 5);
 
   const bos: Zone[] = [];
   const choch: Zone[] = [];
