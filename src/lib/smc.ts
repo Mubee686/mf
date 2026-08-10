@@ -691,7 +691,7 @@ export function analyze(candles: Candle[]): AnalysisResult {
   const lastIndex = candles.length - 1;
   const swings = findSwings(candles, 2);
   const fvg = detectFVG(candles, lastIndex);
-  const structure = detectStructure(candles, swings);
+  const structure = computeStructure(candles);
   const orderBlocks = detectOrderBlocks(candles, structure.obSeeds, lastIndex);
   const liquidity = detectLiquidity(candles, swings, lastIndex);
   const poi = detectPOI(orderBlocks, fvg);
