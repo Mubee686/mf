@@ -152,19 +152,58 @@ interface StructureResult {
   obSeeds: { index: number; kind: ZoneKind; breakIndex: number }[];
 }
 
-function detectStructure(candles: Candle[], swings: Swing[]): StructureResult {
+/**
+ * Swing lookback used for ALL structure (BOS / CHoCH) detection.
+ * 5 bars either side keeps only genuinely significant swing points — a
+ * smaller span flags minor wiggles as structural breaks.
+ * Both terminals (Futures + Forex) share this constant via computeStructure.
+ */
+export const STRUCTURE_SWING_SPAN = 5;
+
+/** Average true range over the last `period` candles up to `index`. */
+function atrAt(candles: Candle[], index: number, period = 14): number {
+  const from = Math.max(1, index - period + 1);
+  let sum = 0;
+  let n = 0;
+  for (let i = from; i <= index && i < candles.length; i++) {
+    const p = candles[i - 1];
+    const c = candles[i];
+    sum += Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close));
+    n++;
+  }
+  return n ? sum / n : 0;
+}
+
+/**
+ * SINGLE SOURCE OF TRUTH for BOS / CHoCH.
+ *
+ * Uptrend  → BOS when a candle CLOSES above the most recent significant
+ *            higher high (swing high).
+ * Downtrend→ BOS when a candle CLOSES below the most recent significant
+ *            lower low (swing low).
+ * The first counter-trend break is labelled CHoCH instead of BOS.
+ *
+ * The break must clear the level by a small ATR buffer so noise doesn't
+ * register as structure.
+ */
+export function computeStructure(
+  candles: Candle[],
+  span: number = STRUCTURE_SWING_SPAN,
+): StructureResult {
   const bos: Zone[] = [];
   const choch: Zone[] = [];
   const obSeeds: { index: number; kind: ZoneKind; breakIndex: number }[] = [];
+  if (candles.length < span * 2 + 3) return { bos, choch, obSeeds };
+
+  const swings = findSwings(candles, span);
 
   let lastHigh: Swing | null = null;
   let lastLow: Swing | null = null;
   let trend: "up" | "down" | null = null;
 
-  // After a BOS fires at candle breakI, only accept a NEW swing that formed
-  // strictly after breakI.  This prevents cycling between nearby old swings.
-  let nextHighMinIdx = 0; // next swing high must have index >= this
-  let nextLowMinIdx  = 0; // next swing low  must have index >= this
+  // After a break fires at candle i, only accept a NEW swing formed after it.
+  let nextHighMinIdx = 0;
+  let nextLowMinIdx = 0;
 
   for (let i = 1; i < candles.length; i++) {
     const c = candles[i];
@@ -172,8 +211,6 @@ function detectStructure(candles: Candle[], swings: Swing[]): StructureResult {
     // Confirmed swings up to (but not including) the current candle.
     const priorSwings = swings.filter((s) => s.index <= i - 1);
 
-    // Pick the most-recent swing high / low that formed at or after the
-    // minimum allowed index (set after the last break to stop cycling).
     const candidateHigh = [...priorSwings]
       .reverse()
       .find((s) => s.type === "high" && s.index >= nextHighMinIdx);
@@ -184,13 +221,15 @@ function detectStructure(candles: Candle[], swings: Swing[]): StructureResult {
       .find((s) => s.type === "low" && s.index >= nextLowMinIdx);
     if (candidateLow) lastLow = candidateLow;
 
-    if (lastHigh && c.close > lastHigh.price) {
-      const kind: ZoneKind = "bullish";
+    // Noise filter: the close must clear the level by a fraction of ATR.
+    const buffer = atrAt(candles, i) * 0.05;
+
+    if (lastHigh && c.close > lastHigh.price + buffer) {
       const isChoch = trend === "down";
       const zone: Zone = {
         id: `${isChoch ? "choch" : "bos"}-b-${i}`,
         tool: isChoch ? "choch" : "bos",
-        kind,
+        kind: "bullish",
         startIndex: lastHigh.index,
         endIndex: i,
         price: lastHigh.price,
@@ -199,17 +238,15 @@ function detectStructure(candles: Candle[], swings: Swing[]): StructureResult {
       };
       (isChoch ? choch : bos).push(zone);
       obSeeds.push({ index: lastHigh.index, kind: "bullish", breakIndex: i });
-      // Next swing high must have formed AFTER this break candle
       nextHighMinIdx = i + 1;
       trend = "up";
       lastHigh = null;
-    } else if (lastLow && c.close < lastLow.price) {
-      const kind: ZoneKind = "bearish";
+    } else if (lastLow && c.close < lastLow.price - buffer) {
       const isChoch = trend === "up";
       const zone: Zone = {
         id: `${isChoch ? "choch" : "bos"}-s-${i}`,
         tool: isChoch ? "choch" : "bos",
-        kind,
+        kind: "bearish",
         startIndex: lastLow.index,
         endIndex: i,
         price: lastLow.price,
@@ -218,7 +255,6 @@ function detectStructure(candles: Candle[], swings: Swing[]): StructureResult {
       };
       (isChoch ? choch : bos).push(zone);
       obSeeds.push({ index: lastLow.index, kind: "bearish", breakIndex: i });
-      // Next swing low must have formed AFTER this break candle
       nextLowMinIdx = i + 1;
       trend = "down";
       lastLow = null;
@@ -227,6 +263,8 @@ function detectStructure(candles: Candle[], swings: Swing[]): StructureResult {
 
   return { bos, choch, obSeeds };
 }
+
+
 
 function detectOrderBlocks(
   candles: Candle[],
