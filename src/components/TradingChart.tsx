@@ -428,7 +428,9 @@ function TradingChartComponent({
     const chochEnabled = enabledToolsRef.current.has("choch");
 
     if (cs.length >= 10 && (bosEnabled || chochEnabled)) {
-      const cacheKey = `${cs.length}:${cs[cs.length - 1]?.time ?? 0}`;
+      // resetKey is `${symbol}|${timeframe}` — including it guarantees a pair or
+      // timeframe switch never reuses the previous market's structure.
+      const cacheKey = [resetKey, cs.length, cs[cs.length - 1]?.time ?? 0].join(":");
       if (!bosCacheRef.current || bosCacheRef.current.key !== cacheKey) {
         bosCacheRef.current = { key: cacheKey, result: detectAllBOS(cs) };
       }
