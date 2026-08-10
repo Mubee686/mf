@@ -17,7 +17,7 @@ type AnyRow = Record<string, any>; // eslint-disable-line @typescript-eslint/no-
 // ─── Public (user-facing) ─────────────────────────────────────────────────────
 
 /** Current user's profile (with member_code) + membership record. */
-export const getMyMembership = createServerFn({ method: "GET" })
+export const getMyMembership = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const sb = context.supabase as AnyClient;
