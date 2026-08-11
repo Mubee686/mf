@@ -112,39 +112,87 @@ export function findSwings(candles: Candle[], span = 2): Swing[] {
   return swings.sort((a, b) => a.index - b.index);
 }
 
-function detectFVG(candles: Candle[], lastIndex: number): Zone[] {
-  const zones: Zone[] = [];
-  for (let i = 1; i < candles.length - 1; i++) {
-    const a = candles[i - 1];
-    const c = candles[i + 1];
-    if (a.high < c.low) {
-      zones.push({
-        id: `fvg-${i}`,
-        tool: "fvg",
-        kind: "bullish",
-        startIndex: i,
-        endIndex: lastIndex,
-        priceHigh: c.low,
-        priceLow: a.high,
-        label: "FVG",
-        detail: "Bullish imbalance",
-      });
-    } else if (a.low > c.high) {
-      zones.push({
-        id: `fvg-${i}`,
-        tool: "fvg",
-        kind: "bearish",
-        startIndex: i,
-        endIndex: lastIndex,
-        priceHigh: a.low,
-        priceLow: c.high,
-        label: "FVG",
-        detail: "Bearish imbalance",
-      });
+/**
+ * Fair Value Gaps — 3-candle imbalance (candle 1 high < candle 3 low, or
+ * candle 1 low > candle 3 high).
+ *
+ * Significance filter: a raw 3-candle gap appears constantly, so we only keep
+ * gaps that are (a) large relative to recent ATR, (b) located inside a real
+ * impulsive leg that produced a confirmed structural break (BOS/CHoCH), and
+ * (c) still unfilled. Only ONE gap per structural leg is kept — the largest,
+ * which is the most meaningful/tradeable one of that leg.
+ */
+function detectFVG(
+  candles: Candle[],
+  seeds: StructureResult["obSeeds"],
+  lastIndex: number,
+): Zone[] {
+  if (!seeds.length) return [];
+  const out: Zone[] = [];
+
+  for (const seed of seeds) {
+    // The impulsive leg runs from the broken swing to the breaking candle.
+    const from = Math.max(1, seed.index);
+    const to = Math.min(candles.length - 2, seed.breakIndex);
+    const atr = atrAt(candles, to) || 0;
+    let best: Zone | null = null;
+    let bestSize = 0;
+
+    for (let i = from; i <= to; i++) {
+      const a = candles[i - 1];
+      const c = candles[i + 1];
+      let low = 0;
+      let high = 0;
+      if (seed.kind === "bullish" && a.high < c.low) {
+        low = a.high;
+        high = c.low;
+      } else if (seed.kind === "bearish" && a.low > c.high) {
+        low = c.high;
+        high = a.low;
+      } else {
+        continue;
+      }
+
+      const size = high - low;
+      // (a) significance: gap must be a meaningful slice of recent volatility
+      if (atr > 0 && size < atr * 0.35) continue;
+
+      // (c) unfilled: no later candle has traded fully back through the gap
+      let filled = false;
+      for (let j = i + 2; j <= lastIndex; j++) {
+        if (seed.kind === "bullish" ? candles[j].low <= low : candles[j].high >= high) {
+          filled = true;
+          break;
+        }
+      }
+      if (filled) continue;
+
+      if (size > bestSize) {
+        bestSize = size;
+        best = {
+          id: `fvg-${i}`,
+          tool: "fvg",
+          kind: seed.kind,
+          startIndex: i,
+          endIndex: lastIndex,
+          priceHigh: high,
+          priceLow: low,
+          label: "FVG",
+          detail: seed.kind === "bullish" ? "Bullish imbalance" : "Bearish imbalance",
+        };
+      }
     }
+    if (best) out.push(best);
   }
-  return zones.slice(-6);
+
+  // Dedupe identical candles across overlapping legs; keep the most recent few.
+  const map = new Map<number, Zone>();
+  for (const z of out) map.set(z.startIndex, z);
+  return Array.from(map.values())
+    .sort((a, b) => a.startIndex - b.startIndex)
+    .slice(-6);
 }
+
 
 interface StructureResult {
   bos: Zone[];
