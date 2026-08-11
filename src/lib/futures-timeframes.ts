@@ -62,8 +62,27 @@ export function timeframeSixMonthCutoff(now = Date.now()): number {
   return Math.floor(date.getTime() / 1000);
 }
 
+/**
+ * How far back scroll-back pagination may reach for a timeframe.
+ *
+ * Six months is the product floor, but on higher timeframes six months is
+ * only a handful of bars — far too few for swing-pivot structure detection
+ * (BOS / CHoCH). So the cutoff is the EARLIER of six months ago and
+ * STRUCTURE_HISTORY_BARS bars ago, which keeps 1W / 1mo usable.
+ */
+export const STRUCTURE_HISTORY_BARS = 1500;
+
+export function timeframeHistoryCutoff(timeframeId: string, now = Date.now()): number {
+  const plan = futuresIntervalPlan(timeframeId);
+  const barsBack = Math.floor(now / 1000) - STRUCTURE_HISTORY_BARS * plan.seconds;
+  return Math.min(timeframeSixMonthCutoff(now), barsBack);
+}
+
+/** Bars we want available for structure detection on any timeframe. */
+export const TARGET_STRUCTURE_BARS = 1000;
+
 export function nativeBatchLimit(plan: FuturesIntervalPlan): number {
   if (!plan.aggregateSeconds) return 1500;
   const native = getTimeframe(plan.binanceInterval === "1M" ? "1mo" : plan.binanceInterval);
-  return Math.min(1500, Math.max(100, Math.ceil((500 * plan.seconds) / native.seconds)));
+  return Math.min(1500, Math.max(200, Math.ceil((TARGET_STRUCTURE_BARS * plan.seconds) / native.seconds)));
 }
