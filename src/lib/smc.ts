@@ -196,14 +196,47 @@ export function computeStructure(
   if (candles.length < span * 2 + 3) return { bos, choch, obSeeds };
 
   const swings = findSwings(candles, span);
+  // Minor pivots (pullback swings). A CHoCH is the FIRST counter-trend break
+  // of the most recent minor pullback swing formed after the last break —
+  // shallow pullbacks rarely register as major (span) swings, so using minor
+  // pivots here is what makes reversals detectable at all.
+  const minorSwings = findSwings(candles, Math.max(2, Math.floor(span / 2)));
 
   let lastHigh: Swing | null = null;
   let lastLow: Swing | null = null;
   let trend: "up" | "down" | null = null;
+  let lastBreakIndex = 0;
 
   // After a break fires at candle i, only accept a NEW swing formed after it.
   let nextHighMinIdx = 0;
   let nextLowMinIdx = 0;
+
+  const pushZone = (
+    isChoch: boolean,
+    kind: ZoneKind,
+    swingIndex: number,
+    price: number,
+    i: number,
+  ) => {
+    const zone: Zone = {
+      id: `${isChoch ? "choch" : "bos"}-${kind === "bullish" ? "b" : "s"}-${i}`,
+      tool: isChoch ? "choch" : "bos",
+      kind,
+      startIndex: swingIndex,
+      endIndex: i,
+      price,
+      label: isChoch ? "CHoCH" : "BOS",
+      detail: isChoch
+        ? kind === "bullish"
+          ? "Bullish reversal"
+          : "Bearish reversal"
+        : kind === "bullish"
+          ? "Bullish continuation"
+          : "Bearish continuation",
+    };
+    (isChoch ? choch : bos).push(zone);
+    obSeeds.push({ index: swingIndex, kind, breakIndex: i });
+  };
 
   for (let i = 1; i < candles.length; i++) {
     const c = candles[i];
@@ -221,45 +254,61 @@ export function computeStructure(
       .find((s) => s.type === "low" && s.index >= nextLowMinIdx);
     if (candidateLow) lastLow = candidateLow;
 
+    // Most recent minor pullback pivot formed after the last structural break.
+    const pullbackLow =
+      trend === "up"
+        ? [...minorSwings]
+            .reverse()
+            .find((s) => s.type === "low" && s.index > lastBreakIndex && s.index <= i - 1)
+        : undefined;
+    const pullbackHigh =
+      trend === "down"
+        ? [...minorSwings]
+            .reverse()
+            .find((s) => s.type === "high" && s.index > lastBreakIndex && s.index <= i - 1)
+        : undefined;
+
     // Noise filter: the close must clear the level by a fraction of ATR.
     const buffer = atrAt(candles, i) * 0.05;
 
-    if (lastHigh && c.close > lastHigh.price + buffer) {
-      const isChoch = trend === "down";
-      const zone: Zone = {
-        id: `${isChoch ? "choch" : "bos"}-b-${i}`,
-        tool: isChoch ? "choch" : "bos",
-        kind: "bullish",
-        startIndex: lastHigh.index,
-        endIndex: i,
-        price: lastHigh.price,
-        label: isChoch ? "CHoCH" : "BOS",
-        detail: isChoch ? "Bullish reversal" : "Bullish continuation",
-      };
-      (isChoch ? choch : bos).push(zone);
-      obSeeds.push({ index: lastHigh.index, kind: "bullish", breakIndex: i });
+    // ── Reversal (CHoCH) takes priority over continuation ────────────────────
+    if (trend === "up" && pullbackLow && c.close < pullbackLow.price - buffer) {
+      pushZone(true, "bearish", pullbackLow.index, pullbackLow.price, i);
+      trend = "down";
+      lastBreakIndex = i;
       nextHighMinIdx = i + 1;
+      nextLowMinIdx = i + 1;
+      lastHigh = null;
+      lastLow = null;
+      continue;
+    }
+    if (trend === "down" && pullbackHigh && c.close > pullbackHigh.price + buffer) {
+      pushZone(true, "bullish", pullbackHigh.index, pullbackHigh.price, i);
+      trend = "up";
+      lastBreakIndex = i;
+      nextHighMinIdx = i + 1;
+      nextLowMinIdx = i + 1;
+      lastHigh = null;
+      lastLow = null;
+      continue;
+    }
+
+    // ── Continuation (BOS) ───────────────────────────────────────────────────
+    if (lastHigh && c.close > lastHigh.price + buffer && trend !== "down") {
+      pushZone(false, "bullish", lastHigh.index, lastHigh.price, i);
+      nextHighMinIdx = i + 1;
+      lastBreakIndex = i;
       trend = "up";
       lastHigh = null;
-    } else if (lastLow && c.close < lastLow.price - buffer) {
-      const isChoch = trend === "up";
-      const zone: Zone = {
-        id: `${isChoch ? "choch" : "bos"}-s-${i}`,
-        tool: isChoch ? "choch" : "bos",
-        kind: "bearish",
-        startIndex: lastLow.index,
-        endIndex: i,
-        price: lastLow.price,
-        label: isChoch ? "CHoCH" : "BOS",
-        detail: isChoch ? "Bearish reversal" : "Bearish continuation",
-      };
-      (isChoch ? choch : bos).push(zone);
-      obSeeds.push({ index: lastLow.index, kind: "bearish", breakIndex: i });
+    } else if (lastLow && c.close < lastLow.price - buffer && trend !== "up") {
+      pushZone(false, "bearish", lastLow.index, lastLow.price, i);
       nextLowMinIdx = i + 1;
+      lastBreakIndex = i;
       trend = "down";
       lastLow = null;
     }
   }
+
 
   return { bos, choch, obSeeds };
 }
