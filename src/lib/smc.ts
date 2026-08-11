@@ -210,7 +210,6 @@ function detectFVG(
   return zones.sort(
     (a, b) => a.startIndex - b.startIndex,
   );
-        }
 
 
 interface StructureResult {
@@ -486,7 +485,6 @@ function detectOrderBlocks(
   return zones.sort(
     (a, b) => a.startIndex - b.startIndex,
   );
-          }
 
 
 function detectLiquidity(candles: Candle[], swings: Swing[], lastIndex: number): Zone[] {
