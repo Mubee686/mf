@@ -170,6 +170,13 @@ function detectFVG(
 
     const atr = atrAt(candles, next.index) || 0;
 
+    let bestFVG: {
+      index: number;
+      low: number;
+      high: number;
+      size: number;
+    } | null = null;
+
     for (let i = from; i <= to; i++) {
       const first = candles[i - 1];
       const third = candles[i + 1];
@@ -180,9 +187,7 @@ function detectFVG(
       if (kind === "bullish" && first.high < third.low) {
         low = first.high;
         high = third.low;
-      }
-
-      if (kind === "bearish" && first.low > third.high) {
+      } else if (kind === "bearish" && first.low > third.high) {
         low = third.high;
         high = first.low;
       }
@@ -191,27 +196,39 @@ function detectFVG(
 
       const size = high - low;
 
-      if (atr > 0 && size < atr * 0.15) continue;
+      // Ignore tiny/noise gaps.
+      if (atr > 0 && size < atr * 0.35) continue;
 
-      // Ignore FVGs completely outside the swing leg.
+      // FVG must remain inside this swing leg.
       if (high < legLow || low > legHigh) continue;
 
-      zones.push({
-        id: `fvg-swing-${current.index}-${next.index}-${i}`,
-        tool: "fvg",
-        kind,
-        startIndex: i,
-        endIndex: lastIndex,
-        priceHigh: high,
-        priceLow: low,
-        label: "FVG",
-        detail:
-          kind === "bullish"
-            ? "Bullish swing FVG"
-            : "Bearish swing FVG",
-      });
+      // Keep only the strongest valid FVG of this swing leg.
+      if (!bestFVG || size > bestFVG.size) {
+        bestFVG = {
+          index: i,
+          low,
+          high,
+          size,
+        };
+      }
     }
-  }
+
+    if (!bestFVG) continue;
+
+    zones.push({
+      id: `fvg-swing-${current.index}-${next.index}-${bestFVG.index}`,
+      tool: "fvg",
+      kind,
+      startIndex: bestFVG.index,
+      endIndex: lastIndex,
+      priceHigh: bestFVG.high,
+      priceLow: bestFVG.low,
+      label: "FVG",
+      detail:
+        kind === "bullish"
+          ? "Bullish swing FVG"
+          : "Bearish swing FVG",
+    });
 
   return zones.sort(
     (a, b) => a.startIndex - b.startIndex,
