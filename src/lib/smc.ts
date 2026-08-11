@@ -787,9 +787,10 @@ export function analyze(candles: Candle[]): AnalysisResult {
 
   const lastIndex = candles.length - 1;
   const swings = findSwings(candles, 2);
-  const fvg = detectFVG(candles, lastIndex);
   const structure = computeStructure(candles);
+  const fvg = detectFVG(candles, structure.obSeeds, lastIndex);
   const orderBlocks = detectOrderBlocks(candles, structure.obSeeds, lastIndex);
+
   const liquidity = detectLiquidity(candles, swings, lastIndex);
   const poi = detectPOI(orderBlocks, fvg);
   // IDM is intentionally chart-window scoped. TradingChart calls
