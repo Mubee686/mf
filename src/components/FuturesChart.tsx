@@ -416,6 +416,7 @@ export function FuturesChart() {
   const _fetchMembership = useServerFn(getMyMembership);
   const fetchMembership = useCallback(_fetchMembership, []);
   useEffect(() => {
+    if (import.meta.env.DEV) { setMembershipActive(true); return; } // TEMP-VERIFY
     const lock = () => {
       setMembershipActive(false);
       setEnabledTools((prev) => {
