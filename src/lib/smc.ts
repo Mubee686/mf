@@ -124,29 +124,38 @@ export function findSwings(candles: Candle[], span = 2): Swing[] {
  */
 function detectFVG(
   candles: Candle[],
-  seeds: StructureResult["obSeeds"],
   lastIndex: number,
 ): Zone[] {
-  if (!seeds.length) return [];
   const out: Zone[] = [];
+  const swings = findSwings(candles, 2);
 
-  for (const seed of seeds) {
-    // The impulsive leg runs from the broken swing to the breaking candle.
-    const from = Math.max(1, seed.index);
-    const to = Math.min(candles.length - 2, seed.breakIndex);
+  for (let s = 0; s < swings.length - 1; s++) {
+    const current = swings[s];
+    const next = swings[s + 1];
+
+    if (current.type === next.type) continue;
+
+    const from = Math.max(1, current.index);
+    const to = Math.min(candles.length - 2, next.index);
+
+    if (to <= from) continue;
+
+    const kind: ZoneKind =
+      next.type === "high" ? "bullish" : "bearish";
+
     const atr = atrAt(candles, to) || 0;
-    let best: Zone | null = null;
-    let bestSize = 0;
 
     for (let i = from; i <= to; i++) {
       const a = candles[i - 1];
       const c = candles[i + 1];
+
       let low = 0;
       let high = 0;
-      if (seed.kind === "bullish" && a.high < c.low) {
+
+      if (kind === "bullish" && a.high < c.low) {
         low = a.high;
         high = c.low;
-      } else if (seed.kind === "bearish" && a.low > c.high) {
+      } else if (kind === "bearish" && a.low > c.high) {
         low = c.high;
         high = a.low;
       } else {
@@ -154,44 +163,51 @@ function detectFVG(
       }
 
       const size = high - low;
-      // (a) significance: gap must be a meaningful slice of recent volatility
+
       if (atr > 0 && size < atr * 0.35) continue;
 
-      // (c) unfilled: no later candle has traded fully back through the gap
       let filled = false;
+
       for (let j = i + 2; j <= lastIndex; j++) {
-        if (seed.kind === "bullish" ? candles[j].low <= low : candles[j].high >= high) {
+        if (
+          kind === "bullish"
+            ? candles[j].low <= low
+            : candles[j].high >= high
+        ) {
           filled = true;
           break;
         }
       }
+
       if (filled) continue;
 
-      if (size > bestSize) {
-        bestSize = size;
-        best = {
-          id: `fvg-${i}`,
-          tool: "fvg",
-          kind: seed.kind,
-          startIndex: i,
-          endIndex: lastIndex,
-          priceHigh: high,
-          priceLow: low,
-          label: "FVG",
-          detail: seed.kind === "bullish" ? "Bullish imbalance" : "Bearish imbalance",
-        };
-      }
+      out.push({
+        id: `fvg-swing-${i}`,
+        tool: "fvg",
+        kind,
+        startIndex: i,
+        endIndex: lastIndex,
+        priceHigh: high,
+        priceLow: low,
+        label: "FVG",
+        detail:
+          kind === "bullish"
+            ? "Bullish imbalance"
+            : "Bearish imbalance",
+      });
     }
-    if (best) out.push(best);
   }
 
-  // Dedupe identical candles across overlapping legs; keep the most recent few.
   const map = new Map<number, Zone>();
-  for (const z of out) map.set(z.startIndex, z);
-  return Array.from(map.values())
-    .sort((a, b) => a.startIndex - b.startIndex)
-    .slice(-6);
-}
+
+  for (const z of out) {
+    map.set(z.startIndex, z);
+  }
+
+  return Array.from(map.values()).sort(
+    (a, b) => a.startIndex - b.startIndex,
+  );
+          }
 
 
 interface StructureResult {
@@ -375,68 +391,95 @@ export function computeStructure(
  * only when the following move is genuinely impulsive — measured as the
  * displacement from the OB to the breaking candle relative to ATR.
  */
+}
 function detectOrderBlocks(
   candles: Candle[],
-  seeds: StructureResult["obSeeds"],
   lastIndex: number,
 ): Zone[] {
   const zones: Zone[] = [];
+  const swings = findSwings(candles, 2);
 
-  for (const seed of seeds) {
-    const atr = atrAt(candles, seed.breakIndex) || 0;
+  for (let s = 0; s < swings.length - 1; s++) {
+    const current = swings[s];
+    const next = swings[s + 1];
 
-    // Walk back from the breaking candle to the broken swing, finding the LAST
-    // opposite-colour candle before the impulse. Search is bounded by the leg.
-    const floor = Math.max(0, Math.min(seed.index, seed.breakIndex - 1));
-    let obIndex = -1;
-    for (let i = seed.breakIndex - 1; i >= floor; i--) {
+    if (current.type === next.type) continue;
+
+    const from = Math.max(0, current.index);
+    const to = Math.min(candles.length - 1, next.index);
+
+    if (to <= from + 1) continue;
+
+    const kind: ZoneKind =
+      next.type === "high" ? "bullish" : "bearish";
+
+    const atr = atrAt(candles, to) || 0;
+
+    for (let i = to - 1; i >= from; i--) {
       const c = candles[i];
-      const isBear = c.close < c.open;
-      const isBull = c.close > c.open;
-      if (seed.kind === "bullish" ? isBear : isBull) {
-        obIndex = i;
-        break;
+
+      const isBearish = c.close < c.open;
+      const isBullish = c.close > c.open;
+
+      const isOpposing =
+        kind === "bullish" ? isBearish : isBullish;
+
+      if (!isOpposing) continue;
+
+      const breakCandle = candles[to];
+
+      const displacement =
+        kind === "bullish"
+          ? breakCandle.close - c.low
+          : c.high - breakCandle.close;
+
+      if (atr > 0 && displacement < atr * 1.2) {
+        continue;
       }
-    }
-    if (obIndex < 0) continue;
 
-    const ob = candles[obIndex];
-    const brk = candles[seed.breakIndex];
+      let mitigated = false;
 
-    // Impulse filter: displacement out of the OB must be significant.
-    const displacement =
-      seed.kind === "bullish" ? brk.close - ob.low : ob.high - brk.close;
-    if (atr > 0 && displacement < atr * 1.2) continue;
-
-    // The OB must not already be fully mitigated (traded completely through).
-    let mitigated = false;
-    for (let j = seed.breakIndex + 1; j <= lastIndex; j++) {
-      if (seed.kind === "bullish" ? candles[j].close < ob.low : candles[j].close > ob.high) {
-        mitigated = true;
-        break;
+      for (let j = i + 1; j <= lastIndex; j++) {
+        if (
+          kind === "bullish"
+            ? candles[j].close < c.low
+            : candles[j].close > c.high
+        ) {
+          mitigated = true;
+          break;
+        }
       }
-    }
-    if (mitigated) continue;
 
-    zones.push({
-      id: `ob-${obIndex}`,
-      tool: "orderBlocks",
-      kind: seed.kind,
-      startIndex: obIndex,
-      endIndex: lastIndex,
-      priceHigh: ob.high,
-      priceLow: ob.low,
-      label: seed.kind === "bullish" ? "Bull OB" : "Bear OB",
-      detail: seed.kind === "bullish" ? "Demand order block" : "Supply order block",
-    });
+      if (mitigated) continue;
+
+      zones.push({
+        id: `ob-swing-${i}`,
+        tool: "orderBlocks",
+        kind,
+        startIndex: i,
+        endIndex: lastIndex,
+        priceHigh: c.high,
+        priceLow: c.low,
+        label: kind === "bullish" ? "Bull OB" : "Bear OB",
+        detail:
+          kind === "bullish"
+            ? "Demand order block"
+            : "Supply order block",
+      });
+
+      break;
+    }
   }
 
-  // Dedupe by candle index (overlapping legs), keep the most recent ones.
   const map = new Map<number, Zone>();
-  for (const z of zones) map.set(z.startIndex, z);
-  return Array.from(map.values())
-    .sort((a, b) => a.startIndex - b.startIndex)
-    .slice(-5);
+
+  for (const z of zones) {
+    map.set(z.startIndex, z);
+  }
+
+  return Array.from(map.values()).sort(
+    (a, b) => a.startIndex - b.startIndex,
+  );
 }
 
 
@@ -824,8 +867,8 @@ export function analyze(candles: Candle[]): AnalysisResult {
   const lastIndex = candles.length - 1;
   const swings = findSwings(candles, 2);
   const structure = computeStructure(candles);
-  const fvg = detectFVG(candles, structure.obSeeds, lastIndex);
-  const orderBlocks = detectOrderBlocks(candles, structure.obSeeds, lastIndex);
+  const fvg = detectFVG(candles, lastIndex);
+const orderBlocks = detectOrderBlocks(candles, lastIndex);
 
   const liquidity = detectLiquidity(candles, swings, lastIndex);
   const poi = detectPOI(orderBlocks, fvg);
