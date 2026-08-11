@@ -126,63 +126,72 @@ function detectFVG(
   candles: Candle[],
   lastIndex: number,
 ): Zone[] {
-  const out: Zone[] = [];
-  const swings = findSwings(candles, 2);
+  const zones: Zone[] = [];
+  const rawSwings = findSwings(candles, 2);
+
+  const swings: Swing[] = [];
+
+  for (const swing of rawSwings) {
+    const prev = swings[swings.length - 1];
+
+    if (!prev) {
+      swings.push(swing);
+      continue;
+    }
+
+    if (prev.type !== swing.type) {
+      swings.push(swing);
+      continue;
+    }
+
+    if (
+      swing.type === "high"
+        ? swing.price > prev.price
+        : swing.price < prev.price
+    ) {
+      swings[swings.length - 1] = swing;
+    }
+  }
 
   for (let s = 0; s < swings.length - 1; s++) {
     const current = swings[s];
     const next = swings[s + 1];
 
-    if (current.type === next.type) continue;
+    const from = Math.max(1, current.index + 1);
+    const to = Math.min(lastIndex - 1, next.index - 1);
 
-    const from = Math.max(1, current.index);
-    const to = Math.min(candles.length - 2, next.index);
-
-    if (to <= from) continue;
+    if (to < from) continue;
 
     const kind: ZoneKind =
       next.type === "high" ? "bullish" : "bearish";
 
-    const atr = atrAt(candles, to) || 0;
+    const atr = atrAt(candles, next.index) || 0;
 
     for (let i = from; i <= to; i++) {
-      const a = candles[i - 1];
-      const c = candles[i + 1];
+      const first = candles[i - 1];
+      const third = candles[i + 1];
 
-      let low = 0;
-      let high = 0;
+      let low: number | null = null;
+      let high: number | null = null;
 
-      if (kind === "bullish" && a.high < c.low) {
-        low = a.high;
-        high = c.low;
-      } else if (kind === "bearish" && a.low > c.high) {
-        low = c.high;
-        high = a.low;
-      } else {
-        continue;
+      if (kind === "bullish" && first.high < third.low) {
+        low = first.high;
+        high = third.low;
       }
+
+      if (kind === "bearish" && first.low > third.high) {
+        low = third.high;
+        high = first.low;
+      }
+
+      if (low === null || high === null) continue;
 
       const size = high - low;
 
-      if (atr > 0 && size < atr * 0.35) continue;
+      if (atr > 0 && size < atr * 0.15) continue;
 
-      let filled = false;
-
-      for (let j = i + 2; j <= lastIndex; j++) {
-        if (
-          kind === "bullish"
-            ? candles[j].low <= low
-            : candles[j].high >= high
-        ) {
-          filled = true;
-          break;
-        }
-      }
-
-      if (filled) continue;
-
-      out.push({
-        id: `fvg-swing-${i}`,
+      zones.push({
+        id: `fvg-swing-${current.index}-${next.index}-${i}`,
         tool: "fvg",
         kind,
         startIndex: i,
@@ -192,22 +201,16 @@ function detectFVG(
         label: "FVG",
         detail:
           kind === "bullish"
-            ? "Bullish imbalance"
-            : "Bearish imbalance",
+            ? "Bullish swing FVG"
+            : "Bearish swing FVG",
       });
     }
   }
 
-  const map = new Map<number, Zone>();
-
-  for (const z of out) {
-    map.set(z.startIndex, z);
-  }
-
-  return Array.from(map.values()).sort(
+  return zones.sort(
     (a, b) => a.startIndex - b.startIndex,
   );
-          }
+        }
 
 
 interface StructureResult {
@@ -391,96 +394,99 @@ export function computeStructure(
  * only when the following move is genuinely impulsive — measured as the
  * displacement from the OB to the breaking candle relative to ATR.
  */
-}
 function detectOrderBlocks(
   candles: Candle[],
   lastIndex: number,
 ): Zone[] {
   const zones: Zone[] = [];
-  const swings = findSwings(candles, 2);
+  const rawSwings = findSwings(candles, 2);
+
+  const swings: Swing[] = [];
+
+  for (const swing of rawSwings) {
+    const prev = swings[swings.length - 1];
+
+    if (!prev) {
+      swings.push(swing);
+      continue;
+    }
+
+    if (prev.type !== swing.type) {
+      swings.push(swing);
+      continue;
+    }
+
+    if (
+      swing.type === "high"
+        ? swing.price > prev.price
+        : swing.price < prev.price
+    ) {
+      swings[swings.length - 1] = swing;
+    }
+  }
 
   for (let s = 0; s < swings.length - 1; s++) {
     const current = swings[s];
     const next = swings[s + 1];
 
-    if (current.type === next.type) continue;
-
     const from = Math.max(0, current.index);
-    const to = Math.min(candles.length - 1, next.index);
+    const to = Math.min(lastIndex, next.index);
 
     if (to <= from + 1) continue;
 
     const kind: ZoneKind =
       next.type === "high" ? "bullish" : "bearish";
 
-    const atr = atrAt(candles, to) || 0;
+    const atr = atrAt(candles, next.index) || 0;
 
-    for (let i = to - 1; i >= from; i--) {
+    for (let i = to - 1; i > from; i--) {
       const c = candles[i];
 
-      const isBearish = c.close < c.open;
       const isBullish = c.close > c.open;
+      const isBearish = c.close < c.open;
 
       const isOpposing =
-        kind === "bullish" ? isBearish : isBullish;
+        kind === "bullish"
+          ? isBearish
+          : isBullish;
 
       if (!isOpposing) continue;
 
-      const breakCandle = candles[to];
-
       const displacement =
         kind === "bullish"
-          ? breakCandle.close - c.low
-          : c.high - breakCandle.close;
+          ? next.price - c.high
+          : c.low - next.price;
 
-      if (atr > 0 && displacement < atr * 1.2) {
+      if (atr > 0 && displacement < atr * 0.5) {
         continue;
       }
 
-      let mitigated = false;
-
-      for (let j = i + 1; j <= lastIndex; j++) {
-        if (
-          kind === "bullish"
-            ? candles[j].close < c.low
-            : candles[j].close > c.high
-        ) {
-          mitigated = true;
-          break;
-        }
-      }
-
-      if (mitigated) continue;
-
       zones.push({
-        id: `ob-swing-${i}`,
+        id: `ob-swing-${current.index}-${next.index}-${i}`,
         tool: "orderBlocks",
         kind,
         startIndex: i,
         endIndex: lastIndex,
         priceHigh: c.high,
         priceLow: c.low,
-        label: kind === "bullish" ? "Bull OB" : "Bear OB",
+        label:
+          kind === "bullish"
+            ? "Bull OB"
+            : "Bear OB",
         detail:
           kind === "bullish"
-            ? "Demand order block"
-            : "Supply order block",
+            ? "Bullish internal swing order block"
+            : "Bearish internal swing order block",
       });
 
       break;
     }
   }
 
-  const map = new Map<number, Zone>();
-
-  for (const z of zones) {
-    map.set(z.startIndex, z);
-  }
-
-  return Array.from(map.values()).sort(
+  return zones.sort(
     (a, b) => a.startIndex - b.startIndex,
   );
-}
+          }
 
 
 function detectLiquidity(candles: Candle[], swings: Swing[], lastIndex: number): Zone[] {
