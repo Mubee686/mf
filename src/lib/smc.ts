@@ -77,7 +77,7 @@ export const TOOLS: ToolMeta[] = [
     name: "Change of Character",
     short: "CHoCH",
     color: "#facc15",
-    tier: "Premium",
+    tier: "premium",
     description: "First counter-trend break signalling a reversal.",
   },
   {
