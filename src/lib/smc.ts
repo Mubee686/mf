@@ -363,46 +363,82 @@ export function computeStructure(
 
 
 
+/**
+ * Order Blocks.
+ *
+ * Bullish OB = the LAST bearish candle immediately before the impulsive
+ * bullish leg that produced a confirmed BOS/CHoCH upward.
+ * Bearish OB = the LAST bullish candle immediately before the impulsive
+ * bearish leg that produced a confirmed BOS/CHoCH downward.
+ *
+ * Only ONE OB per structural leg is emitted (the last opposing candle), and
+ * only when the following move is genuinely impulsive — measured as the
+ * displacement from the OB to the breaking candle relative to ATR.
+ */
 function detectOrderBlocks(
   candles: Candle[],
   seeds: StructureResult["obSeeds"],
   lastIndex: number,
 ): Zone[] {
   const zones: Zone[] = [];
+
   for (const seed of seeds) {
-    // find the last opposing candle before the break move
+    const atr = atrAt(candles, seed.breakIndex) || 0;
+
+    // Walk back from the breaking candle to the broken swing, finding the LAST
+    // opposite-colour candle before the impulse. Search is bounded by the leg.
+    const floor = Math.max(0, Math.min(seed.index, seed.breakIndex - 1));
     let obIndex = -1;
-    for (let i = seed.breakIndex - 1; i >= Math.max(0, seed.breakIndex - 12); i--) {
-      const bearish = candles[i].close < candles[i].open;
-      const bullish = candles[i].close > candles[i].open;
-      if (seed.kind === "bullish" && bearish) {
-        obIndex = i;
-        break;
-      }
-      if (seed.kind === "bearish" && bullish) {
+    for (let i = seed.breakIndex - 1; i >= floor; i--) {
+      const c = candles[i];
+      const isBear = c.close < c.open;
+      const isBull = c.close > c.open;
+      if (seed.kind === "bullish" ? isBear : isBull) {
         obIndex = i;
         break;
       }
     }
     if (obIndex < 0) continue;
-    const c = candles[obIndex];
+
+    const ob = candles[obIndex];
+    const brk = candles[seed.breakIndex];
+
+    // Impulse filter: displacement out of the OB must be significant.
+    const displacement =
+      seed.kind === "bullish" ? brk.close - ob.low : ob.high - brk.close;
+    if (atr > 0 && displacement < atr * 1.2) continue;
+
+    // The OB must not already be fully mitigated (traded completely through).
+    let mitigated = false;
+    for (let j = seed.breakIndex + 1; j <= lastIndex; j++) {
+      if (seed.kind === "bullish" ? candles[j].close < ob.low : candles[j].close > ob.high) {
+        mitigated = true;
+        break;
+      }
+    }
+    if (mitigated) continue;
+
     zones.push({
       id: `ob-${obIndex}`,
       tool: "orderBlocks",
       kind: seed.kind,
       startIndex: obIndex,
       endIndex: lastIndex,
-      priceHigh: c.high,
-      priceLow: c.low,
+      priceHigh: ob.high,
+      priceLow: ob.low,
       label: seed.kind === "bullish" ? "Bull OB" : "Bear OB",
       detail: seed.kind === "bullish" ? "Demand order block" : "Supply order block",
     });
   }
-  // dedupe by index, keep most recent
+
+  // Dedupe by candle index (overlapping legs), keep the most recent ones.
   const map = new Map<number, Zone>();
   for (const z of zones) map.set(z.startIndex, z);
-  return Array.from(map.values()).slice(-5);
+  return Array.from(map.values())
+    .sort((a, b) => a.startIndex - b.startIndex)
+    .slice(-5);
 }
+
 
 function detectLiquidity(candles: Candle[], swings: Swing[], lastIndex: number): Zone[] {
   const zones: Zone[] = [];
