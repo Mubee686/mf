@@ -47,7 +47,8 @@ import {
   aggregateFuturesCandles,
   futuresIntervalPlan,
   nativeBatchLimit,
-  timeframeSixMonthCutoff,
+  timeframeHistoryCutoff,
+  TARGET_STRUCTURE_BARS,
 } from "@/lib/futures-timeframes";
 import { cn } from "@/lib/utils";
 import {
@@ -884,7 +885,7 @@ export function FuturesChart() {
         for (let attempt = 0; attempt < 4; attempt += 1) {
           try {
             const plan = futuresIntervalPlan(requestedTimeframe);
-            const initialLimit = plan.aggregateSeconds ? nativeBatchLimit(plan) : 500;
+            const initialLimit = plan.aggregateSeconds ? nativeBatchLimit(plan) : TARGET_STRUCTURE_BARS;
             klines = await fetchKlines(requestedSymbol, requestedTimeframe, initialLimit, controller.signal);
             if (klines.length > 0) break;
           } catch (failure) {
@@ -937,7 +938,7 @@ export function FuturesChart() {
     if (olderLoadingRef.current || reachedHistoryLimitRef.current || foregroundLoadingRef.current) return;
     const oldest = historyStartRef.current ?? baseCandles[0]?.time;
     if (!oldest) return;
-    const cutoff = timeframeSixMonthCutoff();
+    const cutoff = timeframeHistoryCutoff(timeframe);
     if (oldest <= cutoff) {
       reachedHistoryLimitRef.current = true;
       return;
