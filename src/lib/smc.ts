@@ -162,6 +162,9 @@ function detectFVG(
 
     if (to < from) continue;
 
+    const legLow = Math.min(current.price, next.price);
+    const legHigh = Math.max(current.price, next.price);
+
     const kind: ZoneKind =
       next.type === "high" ? "bullish" : "bearish";
 
@@ -190,6 +193,9 @@ function detectFVG(
 
       if (atr > 0 && size < atr * 0.15) continue;
 
+      // Ignore FVGs completely outside the swing leg.
+      if (high < legLow || low > legHigh) continue;
+
       zones.push({
         id: `fvg-swing-${current.index}-${next.index}-${i}`,
         tool: "fvg",
@@ -210,7 +216,7 @@ function detectFVG(
   return zones.sort(
     (a, b) => a.startIndex - b.startIndex,
   );
-
+}
 
 interface StructureResult {
   bos: Zone[];
@@ -433,6 +439,9 @@ function detectOrderBlocks(
 
     if (to <= from + 1) continue;
 
+    const legLow = Math.min(current.price, next.price);
+    const legHigh = Math.max(current.price, next.price);
+
     const kind: ZoneKind =
       next.type === "high" ? "bullish" : "bearish";
 
@@ -460,6 +469,12 @@ function detectOrderBlocks(
         continue;
       }
 
+      // Do not mark an OB that sits completely outside
+      // the current swing leg.
+      if (c.high < legLow || c.low > legHigh) {
+        continue;
+      }
+
       zones.push({
         id: `ob-swing-${current.index}-${next.index}-${i}`,
         tool: "orderBlocks",
@@ -478,6 +493,7 @@ function detectOrderBlocks(
             : "Bearish internal swing order block",
       });
 
+      // One valid OB for this swing leg.
       break;
     }
   }
@@ -485,8 +501,7 @@ function detectOrderBlocks(
   return zones.sort(
     (a, b) => a.startIndex - b.startIndex,
   );
-
-
+}
 function detectLiquidity(candles: Candle[], swings: Swing[], lastIndex: number): Zone[] {
   const zones: Zone[] = [];
   const tol =
