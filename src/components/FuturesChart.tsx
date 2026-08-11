@@ -558,7 +558,16 @@ export function FuturesChart() {
 
 
     // ── Non-BOS/CHoCH zones + IDM ────────────────────────────────────────────
-    for (const z of [...zonesRef.current.filter((z) => z.tool !== "idm"), ...visibleIDM]) {
+    const visibleZones = zonesRef.current.filter((z) => {
+  if (z.tool === "idm") return false;
+
+  return (
+    z.startIndex <= visTo &&
+    (z.endIndex == null || z.endIndex >= visFrom)
+  );
+});
+
+for (const z of [...visibleZones, ...visibleIDM]) {
       const baseColor = toolColor(z.tool);
       const alpha     = z.tool === "idm" && z.swept ? 0.35 : 1;
 
