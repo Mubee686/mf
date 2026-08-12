@@ -311,12 +311,18 @@ function TradingChartComponent({
     }
     const visibleIDM = idmEnabled ? (idmCacheRef.current?.result ?? []) : [];
 
-    // The general analysis covers the fetched history. IDM is different:
+    // The general analysis covers the fetched history, but OB/FVG/POI are only
+    // relevant where their originating candle is on screen. IDM is different:
     // only the detector result for the currently visible window is drawable.
     for (const z of [
-      ...zonesRef.current.filter((zone) => zone.tool !== "idm"),
+      ...zonesInVisibleRange(
+        zonesRef.current.filter((zone) => zone.tool !== "idm"),
+        visibleFrom,
+        visibleTo,
+      ),
       ...visibleIDM,
     ]) {
+
       const baseColor = toolColor(z.tool);
       // Swept IDM renders faded; everything else at full opacity
       const alpha = z.tool === "idm" && z.swept ? 0.35 : 1;
