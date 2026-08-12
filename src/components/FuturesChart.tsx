@@ -558,14 +558,14 @@ export function FuturesChart() {
 
 
     // ── Non-BOS/CHoCH zones + IDM ────────────────────────────────────────────
-    const visibleZones = zonesRef.current.filter((z) => {
-  if (z.tool === "idm") return false;
+    // OB / FVG / POI are anchored to their originating candle, so only the ones
+    // formed inside the currently visible candle range are drawn.
+    const visibleZones = zonesInVisibleRange(
+      zonesRef.current.filter((z) => z.tool !== "idm"),
+      visFrom,
+      visTo,
+    ).filter((z) => z.startIndex <= visTo && (z.endIndex == null || z.endIndex >= visFrom));
 
-  return (
-    z.startIndex <= visTo &&
-    (z.endIndex == null || z.endIndex >= visFrom)
-  );
-});
 
 for (const z of [...visibleZones, ...visibleIDM]) {
       const baseColor = toolColor(z.tool);
