@@ -159,7 +159,7 @@ export function swingLegs(candles: Candle[], span = 3): SwingLeg[] {
     const atr = atrAt(candles, b.index) || 0;
     const size = Math.abs(b.price - a.price);
     // Significance: a real structural leg travels multiple ATRs.
-    if (atr > 0 && size < atr * 0.6) continue;
+    if (atr > 0 && size < atr * 0.4) continue;
     legs.push({
       startIndex: a.index,
       endIndex: b.index,
@@ -450,7 +450,7 @@ function detectOrderBlocks(candles: Candle[], lastIndex: number, legs: SwingLeg[
       // Impulse filter — the move away from the block must be significant.
       const displacement =
         leg.kind === "bullish" ? leg.endPrice - c.high : c.low - leg.endPrice;
-      if (leg.atr > 0 && displacement < leg.atr * 0.6) continue;
+      if (leg.atr > 0 && displacement < leg.atr * 0.4) continue;
 
       // The block must sit inside this leg's price span.
       if (c.high < legLow || c.low > legHigh) continue;
