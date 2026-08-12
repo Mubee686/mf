@@ -869,8 +869,9 @@ export function analyze(candles: Candle[]): AnalysisResult {
   const lastIndex = candles.length - 1;
   const swings = findSwings(candles, 2);
   const structure = computeStructure(candles);
-  const fvg = detectFVG(candles, lastIndex);
-const orderBlocks = detectOrderBlocks(candles, lastIndex);
+  const legs = swingLegs(candles);
+  const fvg = detectFVG(candles, lastIndex, legs);
+  const orderBlocks = detectOrderBlocks(candles, lastIndex, legs);
 
   const liquidity = detectLiquidity(candles, swings, lastIndex);
   const poi = detectPOI(orderBlocks, fvg);
@@ -897,3 +898,23 @@ export function zonesForTools(result: AnalysisResult, enabled: Set<ToolId>): Zon
   });
   return out;
 }
+
+/**
+ * Restrict origin-anchored zones (OB / FVG / POI) to the candles currently in
+ * view. A zone whose originating candle is off-screen is not relevant to the
+ * visible structure, so a small screen naturally shows fewer zones and a wide
+ * one shows more — with no fixed global cap.
+ */
+export function zonesInVisibleRange(
+  zones: Zone[],
+  visibleFrom: number,
+  visibleTo: number,
+): Zone[] {
+  const from = Math.floor(visibleFrom);
+  const to = Math.ceil(visibleTo);
+  const windowed = new Set<ToolId>(["orderBlocks", "fvg", "poi"]);
+  return zones.filter((z) =>
+    windowed.has(z.tool) ? z.startIndex >= from && z.startIndex <= to : true,
+  );
+}
+
