@@ -113,127 +113,144 @@ export function findSwings(candles: Candle[], span = 2): Swing[] {
 }
 
 /**
- * Fair Value Gaps — 3-candle imbalance (candle 1 high < candle 3 low, or
- * candle 1 low > candle 3 high).
+ * Structural swing legs — the single source of truth for OB / FVG detection.
  *
- * Significance filter: a raw 3-candle gap appears constantly, so we only keep
- * gaps that are (a) large relative to recent ATR, (b) located inside a real
- * impulsive leg that produced a confirmed structural break (BOS/CHoCH), and
- * (c) still unfilled. Only ONE gap per structural leg is kept — the largest,
- * which is the most meaningful/tradeable one of that leg.
+ * A leg is the move between two consecutive (alternating) significant swing
+ * points. Every leg is evaluated independently, so the most recent swing, the
+ * second-most-recent, and all internal swings each get their own OB / FVG.
  */
-function detectFVG(
-  candles: Candle[],
-  lastIndex: number,
-): Zone[] {
-  const zones: Zone[] = [];
-  const rawSwings = findSwings(candles, 2);
+export interface SwingLeg {
+  startIndex: number;
+  endIndex: number;
+  startPrice: number;
+  endPrice: number;
+  kind: ZoneKind; // "bullish" = up-leg (low -> high)
+  atr: number;
+}
 
-  const swings: Swing[] = [];
-
-  for (const swing of rawSwings) {
-    const prev = swings[swings.length - 1];
-
-    if (!prev) {
-      swings.push(swing);
+/** Alternating, extremes-only swing sequence. */
+function alternatingSwings(candles: Candle[], span: number): Swing[] {
+  const raw = findSwings(candles, span);
+  const out: Swing[] = [];
+  for (const s of raw) {
+    const prev = out[out.length - 1];
+    if (!prev || prev.type !== s.type) {
+      out.push(s);
       continue;
     }
-
-    if (prev.type !== swing.type) {
-      swings.push(swing);
-      continue;
-    }
-
-    if (
-      swing.type === "high"
-        ? swing.price > prev.price
-        : swing.price < prev.price
-    ) {
-      swings[swings.length - 1] = swing;
+    if (s.type === "high" ? s.price > prev.price : s.price < prev.price) {
+      out[out.length - 1] = s;
     }
   }
+  return out;
+}
 
-  for (let s = 0; s < swings.length - 1; s++) {
-    const current = swings[s];
-    const next = swings[s + 1];
+/**
+ * Build every significant swing leg. Legs that are small relative to recent
+ * volatility are dropped — those are the noise that produced walls of zones.
+ */
+export function swingLegs(candles: Candle[], span = 3): SwingLeg[] {
+  const swings = alternatingSwings(candles, span);
+  const legs: SwingLeg[] = [];
+  for (let i = 0; i < swings.length - 1; i++) {
+    const a = swings[i];
+    const b = swings[i + 1];
+    if (b.index <= a.index + 1) continue;
+    const atr = atrAt(candles, b.index) || 0;
+    const size = Math.abs(b.price - a.price);
+    // Significance: a real structural leg travels multiple ATRs.
+    if (atr > 0 && size < atr * 1.5) continue;
+    legs.push({
+      startIndex: a.index,
+      endIndex: b.index,
+      startPrice: a.price,
+      endPrice: b.price,
+      kind: b.type === "high" ? "bullish" : "bearish",
+      atr,
+    });
+  }
+  return legs;
+}
 
-    const from = Math.max(1, current.index + 1);
-    const to = Math.min(lastIndex - 1, next.index - 1);
+/**
+ * Fair Value Gaps — one per structural swing leg (the strongest).
+ *
+ * Filters: gap must sit inside the leg, be directionally consistent with it,
+ * be large relative to recent ATR, and still be unfilled.
+ */
+function detectFVG(candles: Candle[], lastIndex: number, legs: SwingLeg[]): Zone[] {
+  const zones: Zone[] = [];
 
+  for (const leg of legs) {
+    const from = Math.max(1, leg.startIndex + 1);
+    const to = Math.min(lastIndex - 1, leg.endIndex);
     if (to < from) continue;
 
-    const legLow = Math.min(current.price, next.price);
-    const legHigh = Math.max(current.price, next.price);
+    const legLow = Math.min(leg.startPrice, leg.endPrice);
+    const legHigh = Math.max(leg.startPrice, leg.endPrice);
 
-    const kind: ZoneKind =
-      next.type === "high" ? "bullish" : "bearish";
-
-    const atr = atrAt(candles, next.index) || 0;
-
-    let bestFVG: {
-      index: number;
-      low: number;
-      high: number;
-      size: number;
-    } | null = null;
+    let best: { index: number; low: number; high: number; size: number } | null = null;
 
     for (let i = from; i <= to; i++) {
       const first = candles[i - 1];
       const third = candles[i + 1];
+      if (!first || !third) continue;
 
       let low: number | null = null;
       let high: number | null = null;
-
-      if (kind === "bullish" && first.high < third.low) {
+      if (leg.kind === "bullish" && first.high < third.low) {
         low = first.high;
         high = third.low;
-      } else if (kind === "bearish" && first.low > third.high) {
+      } else if (leg.kind === "bearish" && first.low > third.high) {
         low = third.high;
         high = first.low;
       }
-
       if (low === null || high === null) continue;
 
       const size = high - low;
-
-      // Ignore tiny/noise gaps.
-      if (atr > 0 && size < atr * 0.35) continue;
-
-      // FVG must remain inside this swing leg.
+      // Noise filter — a genuine imbalance is a real slice of volatility.
+      if (leg.atr > 0 && size < leg.atr * 0.5) continue;
+      // Must belong to this leg's price span.
       if (high < legLow || low > legHigh) continue;
 
-      // Keep only the strongest valid FVG of this swing leg.
-      if (!bestFVG || size > bestFVG.size) {
-        bestFVG = {
-          index: i,
-          low,
-          high,
-          size,
-        };
+      // Mitigation: skip gaps price has already traded fully back through.
+      let filled = false;
+      for (let j = i + 2; j <= lastIndex; j++) {
+        if (leg.kind === "bullish" ? candles[j].low <= low : candles[j].high >= high) {
+          filled = true;
+          break;
+        }
       }
+      if (filled) continue;
+
+      if (!best || size > best.size) best = { index: i, low, high, size };
     }
 
-    if (!bestFVG) continue;
+    if (!best) continue;
 
     zones.push({
-      id: `fvg-swing-${current.index}-${next.index}-${bestFVG.index}`,
+      id: `fvg-${leg.startIndex}-${leg.endIndex}-${best.index}`,
       tool: "fvg",
-      kind,
-      startIndex: bestFVG.index,
+      kind: leg.kind,
+      startIndex: best.index,
       endIndex: lastIndex,
-      priceHigh: bestFVG.high,
-      priceLow: bestFVG.low,
+      priceHigh: best.high,
+      priceLow: best.low,
       label: "FVG",
-      detail:
-        kind === "bullish"
-          ? "Bullish swing FVG"
-          : "Bearish swing FVG",
+      detail: leg.kind === "bullish" ? "Bullish swing FVG" : "Bearish swing FVG",
     });
+  }
 
-  return zones.sort(
-    (a, b) => a.startIndex - b.startIndex,
-  );
+  return dedupeByCandle(zones);
 }
+
+/** Keep one zone per originating candle, ordered oldest → newest. */
+function dedupeByCandle(zones: Zone[]): Zone[] {
+  const map = new Map<number, Zone>();
+  for (const z of zones) map.set(z.startIndex, z);
+  return Array.from(map.values()).sort((a, b) => a.startIndex - b.startIndex);
+}
+
 
 interface StructureResult {
   bos: Zone[];
