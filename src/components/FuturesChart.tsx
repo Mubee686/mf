@@ -59,6 +59,7 @@ import {
   zonesForTools,
   detectAllBOS,
   detectVisibleIDM,
+  zonesInVisibleRange,
 } from "@/lib/smc";
 import { getToolColor, subscribeToolColors, useToolColors } from "@/lib/tool-colors";
 import { ToolColorPicker } from "@/components/ToolColorPicker";
