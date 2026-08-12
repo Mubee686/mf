@@ -25,7 +25,7 @@ import {
 import type { Candle } from "@/lib/forex";
 import { formatPrice } from "@/lib/forex";
 import { getToolColor, subscribeToolColors } from "@/lib/tool-colors";
-import { TOOLS, detectAllBOS, detectVisibleIDM, type Zone, type ToolId } from "@/lib/smc";
+import { TOOLS, detectAllBOS, detectVisibleIDM, zonesInVisibleRange, type Zone, type ToolId } from "@/lib/smc";
 
 export type ChartType = "candlestick" | "line";
 
