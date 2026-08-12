@@ -442,20 +442,22 @@ function detectOrderBlocks(candles: Candle[], lastIndex: number, legs: SwingLeg[
     const legLow = Math.min(leg.startPrice, leg.endPrice);
     const legHigh = Math.max(leg.startPrice, leg.endPrice);
 
-    for (let i = to - 1; i >= from; i--) {
+    const searchFrom = Math.max(0, from - 3);
+    const searchTo = Math.min(to - 1, from + 8);
+
+    let best: { index: number; c: Candle } | null = null;
+
+    for (let i = searchFrom; i <= searchTo; i++) {
       const c = candles[i];
       const isOpposing = leg.kind === "bullish" ? c.close < c.open : c.close > c.open;
       if (!isOpposing) continue;
 
-      // Impulse filter — the move away from the block must be significant.
       const displacement =
         leg.kind === "bullish" ? leg.endPrice - c.high : c.low - leg.endPrice;
       if (leg.atr > 0 && displacement < leg.atr * 0.4) continue;
 
-      // The block must sit inside this leg's price span.
       if (c.high < legLow || c.low > legHigh) continue;
 
-      // Mitigation: skip blocks price has already closed fully through.
       let mitigated = false;
       for (let j = to + 1; j <= lastIndex; j++) {
         if (leg.kind === "bullish" ? candles[j].close < c.low : candles[j].close > c.high) {
@@ -463,23 +465,27 @@ function detectOrderBlocks(candles: Candle[], lastIndex: number, legs: SwingLeg[
           break;
         }
       }
-      if (mitigated) break;
+      if (mitigated) continue;
 
-      zones.push({
-        id: `ob-${leg.startIndex}-${leg.endIndex}-${i}`,
-        tool: "orderBlocks",
-        kind: leg.kind,
-        startIndex: i,
-        endIndex: lastIndex,
-        priceHigh: c.high,
-        priceLow: c.low,
-        label: leg.kind === "bullish" ? "Bull OB" : "Bear OB",
-        detail: leg.kind === "bullish" ? "Demand order block" : "Supply order block",
-      });
-
-      // One valid OB per swing leg.
-      break;
+      if (!best || Math.abs(i - from) < Math.abs(best.index - from)) {
+        best = { index: i, c };
+      }
     }
+
+    if (!best) continue;
+    const { index: i, c } = best;
+
+    zones.push({
+      id: `ob-${leg.startIndex}-${leg.endIndex}-${i}`,
+      tool: "orderBlocks",
+      kind: leg.kind,
+      startIndex: i,
+      endIndex: lastIndex,
+      priceHigh: c.high,
+      priceLow: c.low,
+      label: leg.kind === "bullish" ? "Bull OB" : "Bear OB",
+      detail: leg.kind === "bullish" ? "Demand order block" : "Supply order block",
+    });
   }
 
   return dedupeByCandle(zones);
