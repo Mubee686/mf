@@ -149,7 +149,7 @@ function alternatingSwings(candles: Candle[], span: number): Swing[] {
  * Build every significant swing leg. Legs that are small relative to recent
  * volatility are dropped — those are the noise that produced walls of zones.
  */
-export function swingLegs(candles: Candle[], span = 3): SwingLeg[] {
+export function swingLegs(candles: Candle[], span = 5): SwingLeg[] {
   const swings = alternatingSwings(candles, span);
   const legs: SwingLeg[] = [];
   for (let i = 0; i < swings.length - 1; i++) {
