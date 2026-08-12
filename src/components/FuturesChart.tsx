@@ -229,7 +229,7 @@ export function FuturesChart() {
   const [timeframePickerOpen, setTimeframePickerOpen] = useState(false);
   const [customInput, setCustomInput] = useState("");
   const [customError, setCustomError] = useState("");
-  const [membershipActive, setMembershipActive] = useState(false);
+  const [membershipActive, setMembershipActive] = useState(typeof window !== "undefined" && window.localStorage.getItem("smc-verify") === "1");
   const [changes, setChanges] = useState<Record<string, number>>({});
   const [pairPrices, setPairPrices] = useState<Record<string, number>>({});
   const [pairVolumes, setPairVolumes] = useState<Record<string, number>>({});
