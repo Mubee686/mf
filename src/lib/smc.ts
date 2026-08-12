@@ -422,120 +422,69 @@ export function computeStructure(
 
 
 /**
- * Order Blocks.
+ * Order Blocks — one per structural swing leg.
  *
- * Bullish OB = the LAST bearish candle immediately before the impulsive
- * bullish leg that produced a confirmed BOS/CHoCH upward.
- * Bearish OB = the LAST bullish candle immediately before the impulsive
- * bearish leg that produced a confirmed BOS/CHoCH downward.
+ * Bullish OB = the LAST bearish candle before the impulsive up-leg.
+ * Bearish OB = the LAST bullish candle before the impulsive down-leg.
  *
- * Only ONE OB per structural leg is emitted (the last opposing candle), and
- * only when the following move is genuinely impulsive — measured as the
- * displacement from the OB to the breaking candle relative to ATR.
+ * Validity: the displacement out of the candle must be meaningful relative to
+ * ATR, the candle must belong to the leg, and the block must not yet be fully
+ * mitigated. Colour alone never creates an OB.
  */
-function detectOrderBlocks(
-  candles: Candle[],
-  lastIndex: number,
-): Zone[] {
+function detectOrderBlocks(candles: Candle[], lastIndex: number, legs: SwingLeg[]): Zone[] {
   const zones: Zone[] = [];
-  const rawSwings = findSwings(candles, 2);
 
-  const swings: Swing[] = [];
-
-  for (const swing of rawSwings) {
-    const prev = swings[swings.length - 1];
-
-    if (!prev) {
-      swings.push(swing);
-      continue;
-    }
-
-    if (prev.type !== swing.type) {
-      swings.push(swing);
-      continue;
-    }
-
-    if (
-      swing.type === "high"
-        ? swing.price > prev.price
-        : swing.price < prev.price
-    ) {
-      swings[swings.length - 1] = swing;
-    }
-  }
-
-  for (let s = 0; s < swings.length - 1; s++) {
-    const current = swings[s];
-    const next = swings[s + 1];
-
-    const from = Math.max(0, current.index);
-    const to = Math.min(lastIndex, next.index);
-
+  for (const leg of legs) {
+    const from = leg.startIndex;
+    const to = Math.min(lastIndex, leg.endIndex);
     if (to <= from + 1) continue;
 
-    const legLow = Math.min(current.price, next.price);
-    const legHigh = Math.max(current.price, next.price);
+    const legLow = Math.min(leg.startPrice, leg.endPrice);
+    const legHigh = Math.max(leg.startPrice, leg.endPrice);
 
-    const kind: ZoneKind =
-      next.type === "high" ? "bullish" : "bearish";
-
-    const atr = atrAt(candles, next.index) || 0;
-
-    for (let i = to - 1; i > from; i--) {
+    for (let i = to - 1; i >= from; i--) {
       const c = candles[i];
-
-      const isBullish = c.close > c.open;
-      const isBearish = c.close < c.open;
-
-      const isOpposing =
-        kind === "bullish"
-          ? isBearish
-          : isBullish;
-
+      const isOpposing = leg.kind === "bullish" ? c.close < c.open : c.close > c.open;
       if (!isOpposing) continue;
 
+      // Impulse filter — the move away from the block must be significant.
       const displacement =
-        kind === "bullish"
-          ? next.price - c.high
-          : c.low - next.price;
+        leg.kind === "bullish" ? leg.endPrice - c.high : c.low - leg.endPrice;
+      if (leg.atr > 0 && displacement < leg.atr * 1.2) continue;
 
-      if (atr > 0 && displacement < atr * 0.5) {
-        continue;
-      }
+      // The block must sit inside this leg's price span.
+      if (c.high < legLow || c.low > legHigh) continue;
 
-      // Do not mark an OB that sits completely outside
-      // the current swing leg.
-      if (c.high < legLow || c.low > legHigh) {
-        continue;
+      // Mitigation: skip blocks price has already closed fully through.
+      let mitigated = false;
+      for (let j = to + 1; j <= lastIndex; j++) {
+        if (leg.kind === "bullish" ? candles[j].close < c.low : candles[j].close > c.high) {
+          mitigated = true;
+          break;
+        }
       }
+      if (mitigated) break;
 
       zones.push({
-        id: `ob-swing-${current.index}-${next.index}-${i}`,
+        id: `ob-${leg.startIndex}-${leg.endIndex}-${i}`,
         tool: "orderBlocks",
-        kind,
+        kind: leg.kind,
         startIndex: i,
         endIndex: lastIndex,
         priceHigh: c.high,
         priceLow: c.low,
-        label:
-          kind === "bullish"
-            ? "Bull OB"
-            : "Bear OB",
-        detail:
-          kind === "bullish"
-            ? "Bullish internal swing order block"
-            : "Bearish internal swing order block",
+        label: leg.kind === "bullish" ? "Bull OB" : "Bear OB",
+        detail: leg.kind === "bullish" ? "Demand order block" : "Supply order block",
       });
 
-      // One valid OB for this swing leg.
+      // One valid OB per swing leg.
       break;
     }
   }
 
-  return zones.sort(
-    (a, b) => a.startIndex - b.startIndex,
-  );
+  return dedupeByCandle(zones);
 }
+
 function detectLiquidity(candles: Candle[], swings: Swing[], lastIndex: number): Zone[] {
   const zones: Zone[] = [];
   const tol =
