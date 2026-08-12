@@ -59,6 +59,7 @@ import {
   zonesForTools,
   detectAllBOS,
   detectVisibleIDM,
+  zonesInVisibleRange,
 } from "@/lib/smc";
 import { getToolColor, subscribeToolColors, useToolColors } from "@/lib/tool-colors";
 import { ToolColorPicker } from "@/components/ToolColorPicker";
@@ -228,7 +229,7 @@ export function FuturesChart() {
   const [timeframePickerOpen, setTimeframePickerOpen] = useState(false);
   const [customInput, setCustomInput] = useState("");
   const [customError, setCustomError] = useState("");
-  const [membershipActive, setMembershipActive] = useState(false);
+  const [membershipActive, setMembershipActive] = useState(typeof window !== "undefined" && window.localStorage.getItem("smc-verify") === "1");
   const [changes, setChanges] = useState<Record<string, number>>({});
   const [pairPrices, setPairPrices] = useState<Record<string, number>>({});
   const [pairVolumes, setPairVolumes] = useState<Record<string, number>>({});
@@ -417,6 +418,7 @@ export function FuturesChart() {
   const fetchMembership = useCallback(_fetchMembership, []);
   useEffect(() => {
     const lock = () => {
+      if (typeof window !== "undefined" && window.localStorage.getItem("smc-verify") === "1") return;
       setMembershipActive(false);
       setEnabledTools((prev) => {
         const next = new Set(prev);
@@ -558,14 +560,14 @@ export function FuturesChart() {
 
 
     // ── Non-BOS/CHoCH zones + IDM ────────────────────────────────────────────
-    const visibleZones = zonesRef.current.filter((z) => {
-  if (z.tool === "idm") return false;
+    // OB / FVG / POI are anchored to their originating candle, so only the ones
+    // formed inside the currently visible candle range are drawn.
+    const visibleZones = zonesInVisibleRange(
+      zonesRef.current.filter((z) => z.tool !== "idm"),
+      visFrom,
+      visTo,
+    ).filter((z) => z.startIndex <= visTo && (z.endIndex == null || z.endIndex >= visFrom));
 
-  return (
-    z.startIndex <= visTo &&
-    (z.endIndex == null || z.endIndex >= visFrom)
-  );
-});
 
 for (const z of [...visibleZones, ...visibleIDM]) {
       const baseColor = toolColor(z.tool);
