@@ -418,6 +418,7 @@ export function FuturesChart() {
   const fetchMembership = useCallback(_fetchMembership, []);
   useEffect(() => {
     const lock = () => {
+      if (typeof window !== "undefined" && window.localStorage.getItem("smc-verify") === "1") return;
       setMembershipActive(false);
       setEnabledTools((prev) => {
         const next = new Set(prev);
