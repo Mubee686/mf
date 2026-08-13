@@ -174,76 +174,77 @@ export function swingLegs(candles: Candle[], span = 5): SwingLeg[] {
 }
 
 /**
- * Fair Value Gaps — one per structural swing leg (the strongest).
+ * Fair Value Gaps — strict 3-candle imbalance scan across the WHOLE dataset.
  *
- * Filters: gap must sit inside the leg, be directionally consistent with it,
- * be large relative to recent ATR, and still be unfilled.
+ * Bullish FVG: candle[i-1].high < candle[i+1].low  → zone [c1.high, c3.low]
+ * Bearish FVG: candle[i-1].low  > candle[i+1].high → zone [c3.high, c1.low]
+ *
+ * Every valid triplet is evaluated (internal structure included); nothing is
+ * created where the maths does not hold. Each triplet yields at most one zone
+ * (keyed by its three candle indices + direction + boundaries).
  */
-function detectFVG(candles: Candle[], lastIndex: number, legs: SwingLeg[]): Zone[] {
+function detectFVG(candles: Candle[], lastIndex: number): Zone[] {
   const zones: Zone[] = [];
+  const seen = new Set<string>();
 
-  for (const leg of legs) {
-    const from = Math.max(1, leg.startIndex + 1);
-    const to = Math.min(lastIndex - 1, leg.endIndex);
-    if (to < from) continue;
+  for (let i = 1; i <= lastIndex - 1; i++) {
+    const first = candles[i - 1];
+    const mid = candles[i];
+    const third = candles[i + 1];
+    if (!first || !mid || !third) continue;
 
-    const legLow = Math.min(leg.startPrice, leg.endPrice);
-    const legHigh = Math.max(leg.startPrice, leg.endPrice);
+    let kind: ZoneKind | null = null;
+    let low = 0;
+    let high = 0;
 
-    let best: { index: number; low: number; high: number; size: number } | null = null;
-
-    for (let i = from; i <= to; i++) {
-      const first = candles[i - 1];
-      const third = candles[i + 1];
-      if (!first || !third) continue;
-
-      let low: number | null = null;
-      let high: number | null = null;
-      if (leg.kind === "bullish" && first.high < third.low) {
-        low = first.high;
-        high = third.low;
-      } else if (leg.kind === "bearish" && first.low > third.high) {
-        low = third.high;
-        high = first.low;
-      }
-      if (low === null || high === null) continue;
-
-      const size = high - low;
-      // Noise filter — a genuine imbalance is a real slice of volatility.
-      if (leg.atr > 0 && size < leg.atr * 0.25) continue;
-      // Must belong to this leg's price span.
-      if (high < legLow || low > legHigh) continue;
-
-      // Mitigation: skip gaps price has already traded fully back through.
-      let filled = false;
-      for (let j = i + 2; j <= lastIndex; j++) {
-        if (leg.kind === "bullish" ? candles[j].low <= low : candles[j].high >= high) {
-          filled = true;
-          break;
-        }
-      }
-      if (filled) continue;
-
-      if (!best || size > best.size) best = { index: i, low, high, size };
+    if (first.high < third.low) {
+      kind = "bullish";
+      low = first.high;
+      high = third.low;
+    } else if (first.low > third.high) {
+      kind = "bearish";
+      low = third.high;
+      high = first.low;
     }
+    if (!kind) continue;
 
-    if (!best) continue;
+    const size = high - low;
+    if (size <= 0) continue;
+
+    // Tiny noise floor only — the 3-candle condition is the real rule.
+    const atr = atrAt(candles, i) || 0;
+    if (atr > 0 && size < atr * 0.1) continue;
+
+    // Mitigation: skip gaps price has already traded fully back through.
+    let filled = false;
+    for (let j = i + 2; j <= lastIndex; j++) {
+      if (kind === "bullish" ? candles[j].low <= low : candles[j].high >= high) {
+        filled = true;
+        break;
+      }
+    }
+    if (filled) continue;
+
+    const key = `${kind}-${i - 1}-${i}-${i + 1}-${low}-${high}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
 
     zones.push({
-      id: `fvg-${leg.startIndex}-${leg.endIndex}-${best.index}`,
+      id: `fvg-${kind}-${i - 1}-${i}-${i + 1}`,
       tool: "fvg",
-      kind: leg.kind,
-      startIndex: best.index,
+      kind,
+      startIndex: i,
       endIndex: lastIndex,
-      priceHigh: best.high,
-      priceLow: best.low,
+      priceHigh: high,
+      priceLow: low,
       label: "FVG",
-      detail: leg.kind === "bullish" ? "Bullish swing FVG" : "Bearish swing FVG",
+      detail: kind === "bullish" ? "Bullish 3-candle imbalance" : "Bearish 3-candle imbalance",
     });
   }
 
   return dedupeByCandle(zones);
 }
+
 
 /** Keep one zone per originating candle, ordered oldest → newest. */
 function dedupeByCandle(zones: Zone[]): Zone[] {
@@ -423,75 +424,139 @@ export function computeStructure(
 
 
 /**
- * Order Blocks — one per structural swing leg.
+ * Order Blocks — iterative swing-based scan over the FULL candle dataset.
  *
- * Bullish OB = the LAST bearish candle before the impulsive up-leg.
- * Bearish OB = the LAST bullish candle before the impulsive down-leg.
+ * Loop (deterministic, bounded by the candle array):
+ *   for each CONFIRMED swing pivot (left + right confirmation)
+ *     → require an impulsive displacement out of the pivot
+ *     → require the displacement to break structure (prior opposing pivot)
+ *     → pick the last opposing candle before the impulse candle as the OB
+ *     → reject if mitigated / duplicate / inside an already-used leg
  *
- * Validity: the displacement out of the candle must be meaningful relative to
- * ATR, the candle must belong to the leg, and the block must not yet be fully
- * mitigated. Colour alone never creates an OB.
+ * Internal swings are first-class: every confirmed pivot is evaluated, not
+ * just the highest high / lowest low. Continuation candles inside an already
+ * accepted impulse leg can never spawn extra OBs because the scan skips any
+ * pivot whose index falls before the previous accepted leg's end.
  */
-function detectOrderBlocks(candles: Candle[], lastIndex: number, legs: SwingLeg[]): Zone[] {
+const OB_PIVOT_SPAN = 3; // candles required on BOTH sides to confirm a swing
+const OB_MAX_IMPULSE_BARS = 20; // displacement must resolve within this window
+
+function detectOrderBlocks(candles: Candle[], lastIndex: number): Zone[] {
   const zones: Zone[] = [];
+  const seen = new Set<string>();
 
-  for (const leg of legs) {
-    const from = leg.startIndex;
-    const to = Math.min(lastIndex, leg.endIndex);
-    if (to <= from + 1) continue;
+  // Confirmed pivots only — findSwings requires OB_PIVOT_SPAN candles on each
+  // side, so a swing is never marked before it can be confirmed.
+  const pivots = findSwings(candles, OB_PIVOT_SPAN);
+  if (!pivots.length) return zones;
 
-    const legLow = Math.min(leg.startPrice, leg.endPrice);
-    const legHigh = Math.max(leg.startPrice, leg.endPrice);
+  // End of the last accepted impulse leg — nothing before it may produce
+  // another OB (this is what stops "an OB on every continuation candle").
+  let legGuardIndex = -1;
 
-    const searchFrom = Math.max(0, from - 3);
-    const searchTo = Math.min(to - 1, from + 8);
+  for (const pivot of pivots) {
+    if (pivot.index <= legGuardIndex) continue;
 
-    let best: { index: number; c: Candle } | null = null;
+    const kind: ZoneKind = pivot.type === "low" ? "bullish" : "bearish";
+    const atr = atrAt(candles, pivot.index) || 0;
+    if (atr <= 0) continue;
 
-    for (let i = searchFrom; i <= searchTo; i++) {
-      if (i === from) continue; // the swing-point candle itself is never the OB
-      const c = candles[i];
-      const isOpposing = leg.kind === "bullish" ? c.close < c.open : c.close > c.open;
-      if (!isOpposing) continue;
+    // The last opposing pivot before this swing frames the pullback — taking
+    // it out is the structure interaction that validates the OB.
+    const opposing = [...pivots]
+      .reverse()
+      .find((s) => s.index < pivot.index && s.type !== pivot.type);
 
-      const displacement =
-        leg.kind === "bullish" ? leg.endPrice - c.high : c.low - leg.endPrice;
-      if (leg.atr > 0 && displacement < leg.atr * 0.4) continue;
+    // ── 1..3. Single forward scan: displacement + impulse candle + structure
+    //          break, all inside a bounded window after the confirmed swing.
+    const scanTo = Math.min(lastIndex, pivot.index + OB_MAX_IMPULSE_BARS);
+    let confirmIndex = -1;
+    let impulseIndex = -1;
+    let broke = false;
 
-      if (c.high < legLow || c.low > legHigh) continue;
+    for (let j = pivot.index + 1; j <= scanTo; j++) {
+      const c = candles[j];
+      // Pivot invalidated before any displacement → not an OB origin.
+      if (kind === "bullish" ? c.close < pivot.price : c.close > pivot.price) break;
 
-      let mitigated = false;
-      for (let j = to + 1; j <= lastIndex; j++) {
-        if (leg.kind === "bullish" ? candles[j].close < c.low : candles[j].close > c.high) {
-          mitigated = true;
-          break;
-        }
+      const body = Math.abs(c.close - c.open);
+      const directional = kind === "bullish" ? c.close > c.open : c.close < c.open;
+      if (impulseIndex < 0 && directional && body >= atr * 0.7) impulseIndex = j;
+
+      if (opposing && !broke) {
+        broke = kind === "bullish" ? c.close > opposing.price : c.close < opposing.price;
       }
-      if (mitigated) continue;
 
-      if (!best || Math.abs(i - from) < Math.abs(best.index - from)) {
-        best = { index: i, c };
+      const travel = kind === "bullish" ? c.close - pivot.price : pivot.price - c.close;
+      const displaced = travel >= atr * 1.5;
+      // Without a structural break, only an outsized displacement qualifies.
+      const structural = opposing ? broke || travel >= atr * 2.5 : travel >= atr * 2.5;
+
+      if (impulseIndex >= 0 && displaced && structural) {
+        confirmIndex = j;
+        break;
       }
     }
 
-    if (!best) continue;
-    const { index: i, c } = best;
+    if (confirmIndex < 0 || impulseIndex < 0) continue;
+
+
+    // ── 4. The qualifying OB candle: the LAST opposing candle immediately
+    //       before the impulse candle (never an arbitrary earlier candle).
+    const searchFrom = Math.max(0, impulseIndex - 4);
+    let obIndex = -1;
+    for (let i = impulseIndex - 1; i >= searchFrom; i--) {
+      const c = candles[i];
+      const isOpposing = kind === "bullish" ? c.close < c.open : c.close > c.open;
+      if (isOpposing) {
+        obIndex = i;
+        break;
+      }
+    }
+    // Fallback: the swing candle itself is the base when no opposing candle
+    // sits between it and the impulse.
+    if (obIndex < 0) obIndex = pivot.index;
+
+    const ob = candles[obIndex];
+    if (!ob) continue;
+
+    // ── 5. Mitigation — a decisive close through the block kills it ─────────
+    let mitigated = false;
+    for (let j = confirmIndex + 1; j <= lastIndex; j++) {
+      if (kind === "bullish" ? candles[j].close < ob.low : candles[j].close > ob.high) {
+        mitigated = true;
+        break;
+      }
+    }
+    if (mitigated) {
+      legGuardIndex = confirmIndex;
+      continue;
+    }
+
+    // ── 6. Duplicate protection (index + direction + zone boundaries) ───────
+    const key = `${kind}-${obIndex}-${ob.high}-${ob.low}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
 
     zones.push({
-      id: `ob-${leg.startIndex}-${leg.endIndex}-${i}`,
+      id: `ob-${kind}-${obIndex}-${confirmIndex}`,
       tool: "orderBlocks",
-      kind: leg.kind,
-      startIndex: i,
+      kind,
+      startIndex: obIndex,
       endIndex: lastIndex,
-      priceHigh: c.high,
-      priceLow: c.low,
-      label: leg.kind === "bullish" ? "Bull OB" : "Bear OB",
-      detail: leg.kind === "bullish" ? "Demand order block" : "Supply order block",
+      priceHigh: ob.high,
+      priceLow: ob.low,
+      label: kind === "bullish" ? "Bull OB" : "Bear OB",
+      detail: kind === "bullish" ? "Demand order block" : "Supply order block",
     });
+
+    // Skip the rest of this impulse leg.
+    legGuardIndex = confirmIndex;
   }
 
   return dedupeByCandle(zones);
 }
+
 
 function detectLiquidity(candles: Candle[], swings: Swing[], lastIndex: number): Zone[] {
   const zones: Zone[] = [];
@@ -943,10 +1008,15 @@ export function analyze(candles: Candle[]): AnalysisResult {
   const swings = findSwings(candles, 2);
   const structure = computeStructure(candles);
   const legs = swingLegs(candles);
-  const fvg = detectFVG(candles, lastIndex, legs);
-  const orderBlocks = detectOrderBlocks(candles, lastIndex, legs);
+  const fvg = detectFVG(candles, lastIndex);
+  const orderBlocks = detectOrderBlocks(candles, lastIndex);
   const provisionalOB = detectProvisionalOrderBlock(candles, lastIndex, legs);
-  const orderBlocksOut = provisionalOB ? [...orderBlocks, provisionalOB] : orderBlocks;
+  // Never duplicate a confirmed OB with a forming one on the same candle.
+  const orderBlocksOut =
+    provisionalOB &&
+    !orderBlocks.some((z) => z.startIndex === provisionalOB.startIndex && z.kind === provisionalOB.kind)
+      ? [...orderBlocks, provisionalOB]
+      : orderBlocks;
 
   const liquidity = detectLiquidity(candles, swings, lastIndex);
   const poi = detectPOI(orderBlocks, fvg);
