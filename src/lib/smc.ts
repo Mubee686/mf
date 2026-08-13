@@ -461,64 +461,45 @@ function detectOrderBlocks(candles: Candle[], lastIndex: number): Zone[] {
     const atr = atrAt(candles, pivot.index) || 0;
     if (atr <= 0) continue;
 
-    // ── 1. Displacement out of the swing ────────────────────────────────────
+    // The last opposing pivot before this swing frames the pullback — taking
+    // it out is the structure interaction that validates the OB.
+    const opposing = [...pivots]
+      .reverse()
+      .find((s) => s.index < pivot.index && s.type !== pivot.type);
+
+    // ── 1..3. Single forward scan: displacement + impulse candle + structure
+    //          break, all inside a bounded window after the confirmed swing.
     const scanTo = Math.min(lastIndex, pivot.index + OB_MAX_IMPULSE_BARS);
     let confirmIndex = -1;
+    let impulseIndex = -1;
+    let broke = false;
+
     for (let j = pivot.index + 1; j <= scanTo; j++) {
       const c = candles[j];
       // Pivot invalidated before any displacement → not an OB origin.
       if (kind === "bullish" ? c.close < pivot.price : c.close > pivot.price) break;
+
+      const body = Math.abs(c.close - c.open);
+      const directional = kind === "bullish" ? c.close > c.open : c.close < c.open;
+      if (impulseIndex < 0 && directional && body >= atr * 0.7) impulseIndex = j;
+
+      if (opposing && !broke) {
+        broke = kind === "bullish" ? c.close > opposing.price : c.close < opposing.price;
+      }
+
       const travel = kind === "bullish" ? c.close - pivot.price : pivot.price - c.close;
-      if (travel >= atr * 1.5) {
+      const displaced = travel >= atr * 1.5;
+      // Without a structural break, only an outsized displacement qualifies.
+      const structural = opposing ? broke || travel >= atr * 2.5 : travel >= atr * 2.5;
+
+      if (impulseIndex >= 0 && displaced && structural) {
         confirmIndex = j;
         break;
       }
     }
-    if (confirmIndex < 0) continue;
 
-    // ── 2. The leg must contain a genuine impulse candle ────────────────────
-    let impulseIndex = -1;
-    for (let j = pivot.index + 1; j <= confirmIndex; j++) {
-      const c = candles[j];
-      const body = Math.abs(c.close - c.open);
-      const directional = kind === "bullish" ? c.close > c.open : c.close < c.open;
-      if (directional && body >= atr * 0.7) {
-        impulseIndex = j;
-        break;
-      }
-    }
-    if (impulseIndex < 0) continue;
+    if (confirmIndex < 0 || impulseIndex < 0) continue;
 
-    // ── 3. Structure interaction: the displacement must take out the last
-    //       opposing pivot (the swing that framed the pullback). When no such
-    //       pivot exists yet, demand a larger displacement instead.
-    const opposing = [...pivots]
-      .reverse()
-      .find((s) => s.index < pivot.index && s.type !== pivot.type);
-    if (opposing) {
-      let broke = false;
-      for (let j = impulseIndex; j <= confirmIndex; j++) {
-        if (
-          kind === "bullish" ? candles[j].close > opposing.price : candles[j].close < opposing.price
-        ) {
-          broke = true;
-          break;
-        }
-      }
-      if (!broke) {
-        const travel =
-          kind === "bullish"
-            ? candles[confirmIndex].close - pivot.price
-            : pivot.price - candles[confirmIndex].close;
-        if (travel < atr * 2.5) continue;
-      }
-    } else {
-      const travel =
-        kind === "bullish"
-          ? candles[confirmIndex].close - pivot.price
-          : pivot.price - candles[confirmIndex].close;
-      if (travel < atr * 2.5) continue;
-    }
 
     // ── 4. The qualifying OB candle: the LAST opposing candle immediately
     //       before the impulse candle (never an arbitrary earlier candle).
