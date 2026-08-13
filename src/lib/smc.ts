@@ -501,19 +501,10 @@ function detectOrderBlocks(candles: Candle[], lastIndex: number): Zone[] {
     if (confirmIndex < 0 || impulseIndex < 0) continue;
 
 
-    // ── 4. The qualifying OB candle: the LAST opposing candle immediately
-    //       before the impulse candle (never an arbitrary earlier candle).
-    const searchFrom = Math.max(0, impulseIndex - 4);
-    let obIndex = -1;
-    for (let i = impulseIndex - 1; i >= searchFrom; i--) {
-      const c = candles[i];
-      const isOpposing = kind === "bullish" ? c.close < c.open : c.close > c.open;
-      if (isOpposing) {
-        obIndex = i;
-        break;
-      }
-    }
-    if (obIndex < 0) continue;
+    // ── 4. The qualifying OB candle: always the candle immediately
+      //       to the left of the swing high/low itself.
+      const obIndex = pivot.index - 1;
+      if (obIndex < 0) continue;
     const ob = candles[obIndex];
     if (!ob) continue;
 
