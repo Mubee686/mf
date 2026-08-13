@@ -174,76 +174,77 @@ export function swingLegs(candles: Candle[], span = 5): SwingLeg[] {
 }
 
 /**
- * Fair Value Gaps — one per structural swing leg (the strongest).
+ * Fair Value Gaps — strict 3-candle imbalance scan across the WHOLE dataset.
  *
- * Filters: gap must sit inside the leg, be directionally consistent with it,
- * be large relative to recent ATR, and still be unfilled.
+ * Bullish FVG: candle[i-1].high < candle[i+1].low  → zone [c1.high, c3.low]
+ * Bearish FVG: candle[i-1].low  > candle[i+1].high → zone [c3.high, c1.low]
+ *
+ * Every valid triplet is evaluated (internal structure included); nothing is
+ * created where the maths does not hold. Each triplet yields at most one zone
+ * (keyed by its three candle indices + direction + boundaries).
  */
-function detectFVG(candles: Candle[], lastIndex: number, legs: SwingLeg[]): Zone[] {
+function detectFVG(candles: Candle[], lastIndex: number): Zone[] {
   const zones: Zone[] = [];
+  const seen = new Set<string>();
 
-  for (const leg of legs) {
-    const from = Math.max(1, leg.startIndex + 1);
-    const to = Math.min(lastIndex - 1, leg.endIndex);
-    if (to < from) continue;
+  for (let i = 1; i <= lastIndex - 1; i++) {
+    const first = candles[i - 1];
+    const mid = candles[i];
+    const third = candles[i + 1];
+    if (!first || !mid || !third) continue;
 
-    const legLow = Math.min(leg.startPrice, leg.endPrice);
-    const legHigh = Math.max(leg.startPrice, leg.endPrice);
+    let kind: ZoneKind | null = null;
+    let low = 0;
+    let high = 0;
 
-    let best: { index: number; low: number; high: number; size: number } | null = null;
-
-    for (let i = from; i <= to; i++) {
-      const first = candles[i - 1];
-      const third = candles[i + 1];
-      if (!first || !third) continue;
-
-      let low: number | null = null;
-      let high: number | null = null;
-      if (leg.kind === "bullish" && first.high < third.low) {
-        low = first.high;
-        high = third.low;
-      } else if (leg.kind === "bearish" && first.low > third.high) {
-        low = third.high;
-        high = first.low;
-      }
-      if (low === null || high === null) continue;
-
-      const size = high - low;
-      // Noise filter — a genuine imbalance is a real slice of volatility.
-      if (leg.atr > 0 && size < leg.atr * 0.25) continue;
-      // Must belong to this leg's price span.
-      if (high < legLow || low > legHigh) continue;
-
-      // Mitigation: skip gaps price has already traded fully back through.
-      let filled = false;
-      for (let j = i + 2; j <= lastIndex; j++) {
-        if (leg.kind === "bullish" ? candles[j].low <= low : candles[j].high >= high) {
-          filled = true;
-          break;
-        }
-      }
-      if (filled) continue;
-
-      if (!best || size > best.size) best = { index: i, low, high, size };
+    if (first.high < third.low) {
+      kind = "bullish";
+      low = first.high;
+      high = third.low;
+    } else if (first.low > third.high) {
+      kind = "bearish";
+      low = third.high;
+      high = first.low;
     }
+    if (!kind) continue;
 
-    if (!best) continue;
+    const size = high - low;
+    if (size <= 0) continue;
+
+    // Tiny noise floor only — the 3-candle condition is the real rule.
+    const atr = atrAt(candles, i) || 0;
+    if (atr > 0 && size < atr * 0.1) continue;
+
+    // Mitigation: skip gaps price has already traded fully back through.
+    let filled = false;
+    for (let j = i + 2; j <= lastIndex; j++) {
+      if (kind === "bullish" ? candles[j].low <= low : candles[j].high >= high) {
+        filled = true;
+        break;
+      }
+    }
+    if (filled) continue;
+
+    const key = `${kind}-${i - 1}-${i}-${i + 1}-${low}-${high}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
 
     zones.push({
-      id: `fvg-${leg.startIndex}-${leg.endIndex}-${best.index}`,
+      id: `fvg-${kind}-${i - 1}-${i}-${i + 1}`,
       tool: "fvg",
-      kind: leg.kind,
-      startIndex: best.index,
+      kind,
+      startIndex: i,
       endIndex: lastIndex,
-      priceHigh: best.high,
-      priceLow: best.low,
+      priceHigh: high,
+      priceLow: low,
       label: "FVG",
-      detail: leg.kind === "bullish" ? "Bullish swing FVG" : "Bearish swing FVG",
+      detail: kind === "bullish" ? "Bullish 3-candle imbalance" : "Bearish 3-candle imbalance",
     });
   }
 
   return dedupeByCandle(zones);
 }
+
 
 /** Keep one zone per originating candle, ordered oldest → newest. */
 function dedupeByCandle(zones: Zone[]): Zone[] {
