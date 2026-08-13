@@ -575,8 +575,11 @@ for (const z of [...visibleZones, ...visibleIDM]) {
 
       let x0 = xOf(z.startIndex);
       if (x0 == null) x0 = 0;
+      const nextX = xOf(Math.min(cs.length - 1, z.startIndex + 1));
+      const prevX = xOf(Math.max(0, z.startIndex - 1));
+      const barSpacing = nextX != null ? nextX - x0 : prevX != null ? x0 - prevX : 0;
+      if (barSpacing) x0 -= barSpacing / 2;
       const x1 = paneRight;
-
       if (z.priceHigh != null && z.priceLow != null) {
         // ── Box zone (OB, FVG, POI, LQ) ────────────────────────────────────
         const yh = yOf(z.priceHigh);
