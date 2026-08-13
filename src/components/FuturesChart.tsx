@@ -584,16 +584,18 @@ for (const z of [...visibleZones, ...visibleIDM]) {
         if (yh == null || yl == null) continue;
         const top = Math.min(yh, yl);
         const h   = Math.abs(yl - yh);
-        ctx.fillStyle   = hexToRgba(baseColor, 0.1 * alpha);
+        const provisionalMul = z.provisional ? 0.6 : 1;
+        ctx.fillStyle   = hexToRgba(baseColor, 0.1 * alpha * provisionalMul);
         ctx.fillRect(x0, top, x1 - x0, h);
-        ctx.strokeStyle = hexToRgba(baseColor, 0.85 * alpha);
+        ctx.strokeStyle = hexToRgba(baseColor, 0.85 * alpha * provisionalMul);
         ctx.lineWidth   = 1;
-        ctx.setLineDash([]);
+        ctx.setLineDash(z.provisional ? [4, 3] : []);
         ctx.strokeRect(x0 + 0.5, top + 0.5, x1 - x0 - 1, h);
-        ctx.fillStyle   = hexToRgba(baseColor, 0.95 * alpha);
+        ctx.setLineDash([]);
+        ctx.fillStyle   = hexToRgba(baseColor, 0.95 * alpha * provisionalMul);
         ctx.font        = "10px ui-sans-serif, system-ui, sans-serif";
         ctx.textBaseline = "bottom";
-        ctx.fillText(z.label, x0 + 4, top - 1 > 10 ? top - 1 : top + 11);
+        ctx.fillText(z.provisional ? `${z.label}?` : z.label, x0 + 4, top - 1 > 10 ? top - 1 : top + 11);
       } else if (z.price != null) {
         const y = yOf(z.price);
         if (y == null) continue;
