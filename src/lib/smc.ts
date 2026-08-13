@@ -513,10 +513,7 @@ function detectOrderBlocks(candles: Candle[], lastIndex: number): Zone[] {
         break;
       }
     }
-    // Fallback: the swing candle itself is the base when no opposing candle
-    // sits between it and the impulse.
-    if (obIndex < 0) obIndex = pivot.index;
-
+    if (obIndex < 0) continue;
     const ob = candles[obIndex];
     if (!ob) continue;
 
