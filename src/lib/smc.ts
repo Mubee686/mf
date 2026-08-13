@@ -1027,8 +1027,8 @@ export function analyze(candles: Candle[]): AnalysisResult {
   const swings = findSwings(candles, 2);
   const structure = computeStructure(candles);
   const legs = swingLegs(candles);
-  const fvg = detectFVG(candles, lastIndex, legs);
-  const orderBlocks = detectOrderBlocks(candles, lastIndex, legs);
+  const fvg = detectFVG(candles, lastIndex);
+  const orderBlocks = detectOrderBlocks(candles, lastIndex);
   const provisionalOB = detectProvisionalOrderBlock(candles, lastIndex, legs);
   const orderBlocksOut = provisionalOB ? [...orderBlocks, provisionalOB] : orderBlocks;
 
