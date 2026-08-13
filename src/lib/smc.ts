@@ -19,7 +19,8 @@ export interface Zone {
   detail: string;
   // IDM-specific
   swept?: boolean;
-  sweepIndex?: number; // candle index where price first traded through the IDM level
+sweepIndex?: number; // candle index where price first traded through the IDM level
+  provisional?: boolean;
 }
 
 export interface ToolMeta {
@@ -859,6 +860,71 @@ export interface AnalysisResult {
   poi: Zone[];
   idm: Zone[];
 }
+function detectProvisionalOrderBlock(
+  candles: Candle[],
+  lastIndex: number,
+  legs: SwingLeg[],
+): Zone | null {
+  if (lastIndex < 5) return null;
+
+  const lastConfirmedIndex = legs.length ? legs[legs.length - 1].endIndex : 0;
+  const windowStart = Math.max(lastConfirmedIndex, lastIndex - 6);
+  if (lastIndex - windowStart < 2) return null;
+
+  const atr = atrAt(candles, lastIndex) || 0;
+  if (atr <= 0) return null;
+
+  let hiIdx = windowStart;
+  let loIdx = windowStart;
+  for (let i = windowStart; i <= lastIndex; i++) {
+    if (candles[i].high > candles[hiIdx].high) hiIdx = i;
+    if (candles[i].low < candles[loIdx].low) loIdx = i;
+  }
+
+  const lastClose = candles[lastIndex].close;
+  const dropFromHigh = candles[hiIdx].high - lastClose;
+  const riseFromLow = lastClose - candles[loIdx].low;
+
+  let kind: ZoneKind | null = null;
+  let extremeIdx = -1;
+  if (dropFromHigh >= atr * 0.5 && dropFromHigh >= riseFromLow) {
+    kind = "bearish";
+    extremeIdx = hiIdx;
+  } else if (riseFromLow >= atr * 0.5) {
+    kind = "bullish";
+    extremeIdx = loIdx;
+  }
+  if (!kind || extremeIdx >= lastIndex) return null;
+
+  const searchFrom = Math.max(0, extremeIdx - 3);
+  const searchTo = Math.min(lastIndex, extremeIdx + 2);
+  let best: { index: number; c: Candle } | null = null;
+  for (let i = searchFrom; i <= searchTo; i++) {
+    const c = candles[i];
+    const isOpposing = kind === "bullish" ? c.close < c.open : c.close > c.open;
+    if (!isOpposing) continue;
+    if (!best || Math.abs(i - extremeIdx) < Math.abs(best.index - extremeIdx)) {
+      best = { index: i, c };
+    }
+  }
+  if (!best) return null;
+  const { index: i, c } = best;
+
+  return {
+    id: `ob-provisional-${i}`,
+    tool: "orderBlocks",
+    kind,
+    startIndex: i,
+    endIndex: lastIndex,
+    priceHigh: c.high,
+    priceLow: c.low,
+    label: kind === "bullish" ? "Bull OB" : "Bear OB",
+    detail:
+      (kind === "bullish" ? "Demand order block" : "Supply order block") +
+      " — forming, not yet confirmed",
+    provisional: true,
+  };
+}
 
 export function analyze(candles: Candle[]): AnalysisResult {
   const empty: AnalysisResult = {
@@ -878,6 +944,8 @@ export function analyze(candles: Candle[]): AnalysisResult {
   const legs = swingLegs(candles);
   const fvg = detectFVG(candles, lastIndex, legs);
   const orderBlocks = detectOrderBlocks(candles, lastIndex, legs);
+  const provisionalOB = detectProvisionalOrderBlock(candles, lastIndex, legs);
+  const orderBlocksOut = provisionalOB ? [...orderBlocks, provisionalOB] : orderBlocks;
 
   const liquidity = detectLiquidity(candles, swings, lastIndex);
   const poi = detectPOI(orderBlocks, fvg);
@@ -886,8 +954,8 @@ export function analyze(candles: Candle[]): AnalysisResult {
   // full-history analysis result here.
   const idm: Zone[] = [];
 
-  return {
-    orderBlocks,
+ return {
+    orderBlocks: orderBlocksOut,
     fvg,
     liquidity,
     bos: structure.bos,
