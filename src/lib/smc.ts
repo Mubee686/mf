@@ -1030,7 +1030,12 @@ export function analyze(candles: Candle[]): AnalysisResult {
   const fvg = detectFVG(candles, lastIndex);
   const orderBlocks = detectOrderBlocks(candles, lastIndex);
   const provisionalOB = detectProvisionalOrderBlock(candles, lastIndex, legs);
-  const orderBlocksOut = provisionalOB ? [...orderBlocks, provisionalOB] : orderBlocks;
+  // Never duplicate a confirmed OB with a forming one on the same candle.
+  const orderBlocksOut =
+    provisionalOB &&
+    !orderBlocks.some((z) => z.startIndex === provisionalOB.startIndex && z.kind === provisionalOB.kind)
+      ? [...orderBlocks, provisionalOB]
+      : orderBlocks;
 
   const liquidity = detectLiquidity(candles, swings, lastIndex);
   const poi = detectPOI(orderBlocks, fvg);
