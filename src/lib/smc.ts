@@ -449,6 +449,7 @@ function detectOrderBlocks(candles: Candle[], lastIndex: number, legs: SwingLeg[
     let best: { index: number; c: Candle } | null = null;
 
     for (let i = searchFrom; i <= searchTo; i++) {
+      if (i === from) continue; // the swing-point candle itself is never the OB
       const c = candles[i];
       const isOpposing = leg.kind === "bullish" ? c.close < c.open : c.close > c.open;
       if (!isOpposing) continue;
