@@ -950,19 +950,9 @@ function detectProvisionalOrderBlock(
   }
   if (!kind || extremeIdx >= lastIndex) return null;
 
-  const searchFrom = Math.max(0, extremeIdx - 3);
-  const searchTo = Math.min(lastIndex, extremeIdx + 2);
-  let best: { index: number; c: Candle } | null = null;
-  for (let i = searchFrom; i <= searchTo; i++) {
-    const c = candles[i];
-    const isOpposing = kind === "bullish" ? c.close < c.open : c.close > c.open;
-    if (!isOpposing) continue;
-    if (!best || Math.abs(i - extremeIdx) < Math.abs(best.index - extremeIdx)) {
-      best = { index: i, c };
-    }
-  }
-  if (!best) return null;
-  const { index: i, c } = best;
+  const i = extremeIdx - 1;
+  if (i < 0) return null;
+  const c = candles[i];
 
   return {
     id: `ob-provisional-${i}`,
