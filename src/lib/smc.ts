@@ -503,7 +503,7 @@ function detectOrderBlocks(candles: Candle[], lastIndex: number): Zone[] {
 
     // ── 4. The qualifying OB candle: always the candle immediately
       //       to the left of the swing high/low itself.
-      const obIndex = pivot.index - 1;
+      const obIndex = impulseIndex - 1;
       if (obIndex < 0) continue;
     const ob = candles[obIndex];
     if (!ob) continue;
