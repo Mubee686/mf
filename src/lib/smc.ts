@@ -449,8 +449,16 @@ const OB_PIVOT_SPAN = 3; // candles required on BOTH sides to confirm a swing
  *  • Box = that single candle's own high / low. Candle colour is irrelevant.
  *  • If price later CLOSES through the box (above high for Bear OB, below low
  *    for Bull OB) the block is removed immediately.
+ *  • EXTRA CONDITION: the swing must have a matching FVG next to it, in the
+ *    direction price moved after the swing —
+ *      Bear OB (swing high) → a bearish FVG entirely BELOW the OB's low
+ *      Bull OB (swing low)  → a bullish FVG entirely ABOVE the OB's high
+ *    formed within OB_FVG_WINDOW candles after the swing candle.
+ *    No matching FVG → no Order Block for that swing.
  */
-function detectOrderBlocks(candles: Candle[], lastIndex: number): Zone[] {
+const OB_FVG_WINDOW = 12; // bars after the swing in which the FVG must form
+
+function detectOrderBlocks(candles: Candle[], lastIndex: number, fvgZones: Zone[]): Zone[] {
   const zones: Zone[] = [];
   const seen = new Set<string>();
 
@@ -473,9 +481,20 @@ function detectOrderBlocks(candles: Candle[], lastIndex: number): Zone[] {
     }
     if (broken) continue;
 
+    // Matching FVG requirement (direction of the move out of the swing).
+    const hasFvg = fvgZones.some((f) => {
+      if (f.priceHigh == null || f.priceLow == null) return false;
+      if (f.startIndex <= i || f.startIndex > i + OB_FVG_WINDOW) return false;
+      return kind === "bullish"
+        ? f.kind === "bullish" && f.priceLow >= c.high // gap sits above the OB
+        : f.kind === "bearish" && f.priceHigh <= c.low; // gap sits below the OB
+    });
+    if (!hasFvg) continue;
+
     const key = `${kind}-${i}`;
     if (seen.has(key)) continue;
     seen.add(key);
+
 
     zones.push({
       id: `ob-${kind}-${i}`,
