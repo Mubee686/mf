@@ -886,6 +886,7 @@ function detectProvisionalOrderBlock(
   candles: Candle[],
   lastIndex: number,
   legs: SwingLeg[],
+  fvgZones: Zone[],
 ): Zone | null {
   if (lastIndex < 5) return null;
 
@@ -973,8 +974,8 @@ export function analyze(candles: Candle[]): AnalysisResult {
   const structure = computeStructure(candles);
   const legs = swingLegs(candles);
   const fvg = detectFVG(candles, lastIndex);
-  const orderBlocks = detectOrderBlocks(candles, lastIndex);
-  const provisionalOB = detectProvisionalOrderBlock(candles, lastIndex, legs);
+  const orderBlocks = detectOrderBlocks(candles, lastIndex, fvg);
+  const provisionalOB = detectProvisionalOrderBlock(candles, lastIndex, legs, fvg);
   // Never duplicate a confirmed OB with a forming one on the same candle.
   const orderBlocksOut =
     provisionalOB &&
