@@ -927,6 +927,18 @@ function detectProvisionalOrderBlock(
     if (kind === "bullish" ? candles[j].close < c.low : candles[j].close > c.high) return null;
   }
 
+  // Same FVG requirement as confirmed blocks.
+  const hasFvg = fvgZones.some((f) => {
+    if (f.priceHigh == null || f.priceLow == null) return false;
+    if (f.startIndex <= i || f.startIndex > i + OB_FVG_WINDOW) return false;
+    return kind === "bullish"
+      ? f.kind === "bullish" && f.priceLow >= c.high
+      : f.kind === "bearish" && f.priceHigh <= c.low;
+  });
+  if (!hasFvg) return null;
+
+
+
 
   return {
     id: `ob-provisional-${i}`,
