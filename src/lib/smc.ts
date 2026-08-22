@@ -899,9 +899,15 @@ function detectProvisionalOrderBlock(
   }
   if (!kind || extremeIdx >= lastIndex) return null;
 
-  const i = extremeIdx - 1;
+  // The forming block sits ON the extreme candle itself.
+  const i = extremeIdx;
   if (i < 0) return null;
   const c = candles[i];
+  // Removed as soon as price closes back through the block's range.
+  for (let j = i + 1; j <= lastIndex; j++) {
+    if (kind === "bullish" ? candles[j].close < c.low : candles[j].close > c.high) return null;
+  }
+
 
   return {
     id: `ob-provisional-${i}`,
