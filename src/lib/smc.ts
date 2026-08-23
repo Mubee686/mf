@@ -455,6 +455,10 @@ const OB_PIVOT_SPAN = 3; // candles required on BOTH sides to confirm a swing
  *      Bull OB (swing low)  → a bullish FVG entirely ABOVE the OB's high
  *    formed within OB_FVG_WINDOW candles after the swing candle.
  *    No matching FVG → no Order Block for that swing.
+ *  • The FVG check is purely data-side: it uses the zones produced by
+ *    detectFVG() from raw candle highs/lows and is completely independent of
+ *    whether the user has the "fvg" drawing tool enabled. Tool toggles only
+ *    filter what is DRAWN (see zonesForTools), never what is detected.
  */
 const OB_FVG_WINDOW = 12; // bars after the swing in which the FVG must form
 
